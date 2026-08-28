@@ -41,6 +41,7 @@ import com.jhony4lves.echo360.ui.components.EchoStatusPill
 import com.jhony4lves.echo360.ui.system.XboxSystemScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
 import com.jhony4lves.echo360.ui.theme.EchoTheme
+import com.jhony4lves.echo360.ui.transfer.EchoTransferScreen
 
 private enum class EchoDestination(
     val shortLabel: String,
@@ -109,10 +110,7 @@ fun Echo360App() {
                         modifier = Modifier.padding(innerPadding),
                     )
 
-                    EchoDestination.Transfer -> FuturisticPlaceholderScreen(
-                        eyebrow = "ECHO TRANSFER",
-                        title = "Transferência sem Termux.",
-                        description = "Fast, Background e Auto estão migrando para a camada Android nativa com comparação e verificação pós-upload.",
+                    EchoDestination.Transfer -> EchoTransferScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
 
@@ -384,7 +382,7 @@ private fun BuildStatusCard() {
                 PhaseChip("NET", true)
                 PhaseChip("FTP", true)
                 PhaseChip("CMP", true)
-                PhaseChip("UP", false)
+                PhaseChip("UP", true)
                 PhaseChip("LIB", false)
             }
         }
