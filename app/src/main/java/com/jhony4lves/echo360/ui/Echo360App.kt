@@ -1,6 +1,8 @@
 package com.jhony4lves.echo360.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,51 +11,84 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jhony4lves.echo360.ui.components.EchoBackdrop
+import com.jhony4lves.echo360.ui.components.EchoEyebrow
+import com.jhony4lves.echo360.ui.components.EchoNavGlyph
+import com.jhony4lves.echo360.ui.components.EchoPanel
+import com.jhony4lves.echo360.ui.components.EchoStatusPill
 import com.jhony4lves.echo360.ui.system.XboxSystemScreen
+import com.jhony4lves.echo360.ui.theme.EchoColors
+import com.jhony4lves.echo360.ui.theme.EchoTheme
 
 private enum class EchoDestination(
     val shortLabel: String,
+    val code: String,
 ) {
-    Home("Home"),
-    Library("Jogos"),
-    Transfer("Transfer"),
-    System("Xbox"),
+    Home("Home", "HM"),
+    Library("Jogos", "LB"),
+    Transfer("Transfer", "TX"),
+    System("Xbox", "XB"),
 }
 
 @Composable
 fun Echo360App() {
-    MaterialTheme {
-        Surface(modifier = Modifier.fillMaxSize()) {
-            var destination by remember { mutableStateOf(EchoDestination.Home) }
+    EchoTheme {
+        var destination by remember { mutableStateOf(EchoDestination.Home) }
 
+        EchoBackdrop {
             Scaffold(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
                 bottomBar = {
-                    NavigationBar {
+                    NavigationBar(
+                        containerColor = EchoColors.VoidRaised.copy(alpha = 0.98f),
+                        tonalElevation = 0.dp,
+                    ) {
                         EchoDestination.entries.forEach { item ->
+                            val selected = destination == item
                             NavigationBarItem(
-                                selected = destination == item,
+                                selected = selected,
                                 onClick = { destination = item },
-                                icon = { Text(item.shortLabel.take(1)) },
-                                label = { Text(item.shortLabel) },
+                                icon = {
+                                    EchoNavGlyph(
+                                        label = item.code,
+                                        selected = selected,
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        text = item.shortLabel,
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = EchoColors.NeonGreen,
+                                    selectedTextColor = EchoColors.NeonGreen,
+                                    indicatorColor = EchoColors.NeonGreen.copy(alpha = 0.08f),
+                                    unselectedIconColor = EchoColors.TextMuted,
+                                    unselectedTextColor = EchoColors.TextMuted,
+                                ),
                             )
                         }
                     }
@@ -67,15 +102,17 @@ fun Echo360App() {
                         onOpenSystem = { destination = EchoDestination.System },
                     )
 
-                    EchoDestination.Library -> PlaceholderScreen(
-                        title = "EchoLibrary",
-                        description = "Biblioteca nativa, capas, Title ID, Media ID, TU, favoritos, backlog e sessões entram depois da paridade do EchoTransfer.",
+                    EchoDestination.Library -> FuturisticPlaceholderScreen(
+                        eyebrow = "ECHO LIBRARY",
+                        title = "Sua biblioteca vira o launcher.",
+                        description = "Capas, sessões, favoritos, backlog, Title ID, Media ID e TU vão morar aqui com foco primeiro no jogador.",
                         modifier = Modifier.padding(innerPadding),
                     )
 
-                    EchoDestination.Transfer -> PlaceholderScreen(
-                        title = "EchoTransfer",
-                        description = "A camada de rede nativa está sendo construída agora. Ela será a base do Fast, Background e Auto sem Node/Termux.",
+                    EchoDestination.Transfer -> FuturisticPlaceholderScreen(
+                        eyebrow = "ECHO TRANSFER",
+                        title = "Transferência sem Termux.",
+                        description = "Fast, Background e Auto estão migrando para a camada Android nativa com comparação e verificação pós-upload.",
                         modifier = Modifier.padding(innerPadding),
                     )
 
@@ -97,93 +134,90 @@ private fun EchoHome(
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item {
-            Column {
-                Text(
-                    text = "Echo360",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Black,
-                )
-                Text(
-                    text = "Seu Xbox 360, reconstruído para hoje.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        item {
-            XboxStatusCard(onOpenSystem = onOpenSystem)
-        }
-
-        item {
-            ContinuePlayingCard(onOpenLibrary = onOpenLibrary)
-        }
-
-        item {
-            Text(
-                text = "Ações rápidas",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Button(
-                    onClick = onOpenLibrary,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Biblioteca")
-                }
-                Button(
-                    onClick = onOpenTransfer,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Transferir")
-                }
-            }
-        }
-
-        item { FeaturePreviewCard() }
+        item { HeroHeader() }
+        item { ConsoleCommandCard(onOpenSystem = onOpenSystem) }
+        item { ContinuePlayingCard(onOpenLibrary = onOpenLibrary) }
+        item { QuickActions(onOpenLibrary, onOpenTransfer) }
+        item { BuildStatusCard() }
     }
 }
 
 @Composable
-private fun XboxStatusCard(onOpenSystem: () -> Unit) {
-    Card(
+private fun HeroHeader() {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column {
+                EchoEyebrow("ECHO OS // MOBILE LINK")
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    text = "ECHO//360",
+                    style = MaterialTheme.typography.displaySmall,
+                    color = EchoColors.Text,
+                )
+            }
+            EchoStatusPill(text = "ALPHA", active = true)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Seu Xbox 360, reconstruído para hoje.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = EchoColors.TextSecondary,
+        )
+    }
+}
+
+@Composable
+private fun ConsoleCommandCard(onOpenSystem: () -> Unit) {
+    EchoPanel(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
+        highlighted = true,
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Text(
-                text = "Xbox",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Conectividade nativa pronta para configurar",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Configure o console uma vez. O Echo360 guarda as credenciais criptografadas e testa NOVA, Aurora FTP e FTPdll diretamente do Android.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(14.dp))
-            Button(onClick = onOpenSystem) {
-                Text("Configurar Xbox")
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            EchoColors.XboxGreen.copy(alpha = 0.13f),
+                            EchoColors.SurfaceHigh,
+                        ),
+                    ),
+                )
+                .padding(18.dp),
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    EchoEyebrow("CONSOLE LINK")
+                    EchoStatusPill(text = "CONFIGURAR", active = false)
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = "Xbox pronto para entrar na rede Echo.",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = EchoColors.Text,
+                )
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    text = "NOVA, Aurora FTP e FTPdll passam pela mesma camada nativa e segura do aplicativo.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = EchoColors.TextSecondary,
+                )
+                Spacer(Modifier.height(16.dp))
+                EchoPrimaryButton(
+                    text = "CONFIGURAR XBOX",
+                    onClick = onOpenSystem,
+                )
             }
         }
     }
@@ -191,62 +225,230 @@ private fun XboxStatusCard(onOpenSystem: () -> Unit) {
 
 @Composable
 private fun ContinuePlayingCard(onOpenLibrary: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Text(
-                text = "Continuar jogando",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Sua atividade aparecerá aqui",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "O EchoLibrary vai preencher este espaço com o último jogo, sessão e progresso disponível.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    EchoPanel(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                EchoEyebrow("CONTINUAR JOGANDO")
+                Text(
+                    text = "SESSION // --",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = EchoColors.TextMuted,
+                )
+            }
             Spacer(Modifier.height(14.dp))
-            Button(onClick = onOpenLibrary) {
-                Text("Ver biblioteca")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .background(
+                            brush = Brush.radialGradient(
+                                listOf(
+                                    EchoColors.NeonGreen.copy(alpha = 0.28f),
+                                    EchoColors.SurfaceBright,
+                                ),
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "X",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Black,
+                        color = EchoColors.NeonGreen,
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Aguardando primeira sessão",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = EchoColors.Text,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = "O EchoLibrary vai preencher este painel com seu último jogo, tempo e progresso.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = EchoColors.TextSecondary,
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            EchoSecondaryButton(
+                text = "ABRIR BIBLIOTECA",
+                onClick = onOpenLibrary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickActions(
+    onOpenLibrary: () -> Unit,
+    onOpenTransfer: () -> Unit,
+) {
+    Column {
+        EchoEyebrow("QUICK ACCESS")
+        Spacer(Modifier.height(9.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            QuickActionTile(
+                code = "LB",
+                title = "Biblioteca",
+                subtitle = "Jogos e sessões",
+                modifier = Modifier.weight(1f),
+                onClick = onOpenLibrary,
+            )
+            QuickActionTile(
+                code = "TX",
+                title = "Transfer",
+                subtitle = "Fast / Background",
+                modifier = Modifier.weight(1f),
+                onClick = onOpenTransfer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickActionTile(
+    code: String,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    EchoPanel(modifier = modifier) {
+        Column(modifier = Modifier.padding(15.dp)) {
+            Text(
+                text = code,
+                style = MaterialTheme.typography.labelLarge,
+                color = EchoColors.NeonGreen,
+                fontWeight = FontWeight.Black,
+            )
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = EchoColors.Text,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = EchoColors.TextMuted,
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onClick,
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = EchoColors.SurfaceBright,
+                    contentColor = EchoColors.NeonGreen,
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text("ABRIR", style = MaterialTheme.typography.labelMedium)
             }
         }
     }
 }
 
 @Composable
-private fun FeaturePreviewCard() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+private fun BuildStatusCard() {
+    EchoPanel(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            EchoEyebrow("BUILD CHANNEL")
+            Spacer(Modifier.height(10.dp))
             Text(
-                text = "Construindo agora",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                text = "Native Transfer Stack",
+                style = MaterialTheme.typography.titleLarge,
+                color = EchoColors.Text,
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(5.dp))
             Text(
-                text = "Conectividade nativa → EchoTransfer → EchoLibrary",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
+                text = "Conectividade → comparação → upload → Library",
+                style = MaterialTheme.typography.bodyMedium,
+                color = EchoColors.TextSecondary,
             )
-            Text(
-                text = "A rede sai do servidor Node e vira infraestrutura Android reutilizável pelo launcher inteiro.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Spacer(Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                PhaseChip("NET", true)
+                PhaseChip("FTP", true)
+                PhaseChip("CMP", true)
+                PhaseChip("UP", false)
+                PhaseChip("LIB", false)
+            }
         }
     }
 }
 
 @Composable
-private fun PlaceholderScreen(
+private fun PhaseChip(text: String, active: Boolean) {
+    Box(
+        modifier = Modifier
+            .background(
+                color = if (active) {
+                    EchoColors.NeonGreen.copy(alpha = 0.10f)
+                } else {
+                    EchoColors.SurfaceBright
+                },
+                shape = RoundedCornerShape(8.dp),
+            )
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (active) EchoColors.NeonGreen else EchoColors.TextMuted,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun EchoPrimaryButton(text: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = EchoColors.NeonGreen,
+            contentColor = EchoColors.Void,
+        ),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Black,
+        )
+    }
+}
+
+@Composable
+private fun EchoSecondaryButton(text: String, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = EchoColors.SurfaceBright,
+            contentColor = EchoColors.Text,
+        ),
+    ) {
+        Text(text = text, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
+private fun FuturisticPlaceholderScreen(
+    eyebrow: String,
     title: String,
     description: String,
     modifier: Modifier = Modifier,
@@ -254,19 +456,28 @@ private fun PlaceholderScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(18.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Black,
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = description,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        EchoPanel(
+            modifier = Modifier.fillMaxWidth(),
+            highlighted = true,
+        ) {
+            Column(modifier = Modifier.padding(22.dp)) {
+                EchoEyebrow(eyebrow)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = EchoColors.Text,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = EchoColors.TextSecondary,
+                )
+            }
+        }
     }
 }

@@ -1,20 +1,43 @@
 package com.jhony4lves.echo360.ui.system
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.NetworkCheck
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.SettingsEthernet
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,11 +45,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
 import com.jhony4lves.echo360.data.xbox.XboxConnectionRepository
@@ -37,6 +64,9 @@ import com.jhony4lves.echo360.domain.xbox.XboxCredentials
 import com.jhony4lves.echo360.domain.xbox.XboxEndpoint
 import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.domain.xbox.XboxTransport
+import com.jhony4lves.echo360.ui.components.EchoEyebrow
+import com.jhony4lves.echo360.ui.components.EchoPanel
+import com.jhony4lves.echo360.ui.theme.EchoColors
 import kotlinx.coroutines.launch
 
 @Composable
@@ -61,6 +91,10 @@ fun XboxSystemScreen(
     var ftpDllUser by remember { mutableStateOf(initial.credentials.ftpDllUsername) }
     var ftpDllPassword by remember { mutableStateOf(initial.credentials.ftpDllPassword) }
 
+    var showNovaPassword by remember { mutableStateOf(false) }
+    var showAuroraPassword by remember { mutableStateOf(false) }
+    var showFtpDllPassword by remember { mutableStateOf(false) }
+
     var snapshot by remember { mutableStateOf<XboxConnectionSnapshot?>(null) }
     var isTesting by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -84,82 +118,157 @@ fun XboxSystemScreen(
         )
     }.getOrNull()
 
+    fun saveProfile() {
+        val profile = currentProfile()
+        if (profile == null) {
+            message = "Revise IP e portas antes de salvar."
+            return
+        }
+
+        runCatching { store.save(profile) }
+            .onSuccess { message = "Configuração salva com segurança." }
+            .onFailure { message = "Não foi possível salvar a configuração." }
+    }
+
+    fun saveAndTest() {
+        val profile = currentProfile()
+        if (profile == null) {
+            message = "Revise IP e portas antes de testar."
+            return
+        }
+
+        scope.launch {
+            isTesting = true
+            message = null
+            snapshot = runCatching {
+                store.save(profile)
+                repository.check(profile)
+            }.onFailure {
+                message = "Falha ao testar o Xbox. Confira a rede e tente novamente."
+            }.getOrNull()
+            isTesting = false
+        }
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "Xbox",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Black,
-                )
-                Text(
-                    text = "Conexão local do Echo360. Credenciais são criptografadas no aparelho pelo Android Keystore.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            ConsoleHeader()
         }
 
         item {
-            SectionCard(title = "Console") {
-                OutlinedTextField(
-                    value = host,
-                    onValueChange = { host = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("IP ou host") },
-                    singleLine = true,
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+            EchoPanel(
+                modifier = Modifier.fillMaxWidth(),
+                highlighted = true,
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    PortField("NOVA", novaPort, { novaPort = it }, Modifier.weight(1f))
-                    PortField("Aurora", auroraPort, { auroraPort = it }, Modifier.weight(1f))
-                    PortField("FTPdll", ftpDllPort, { ftpDllPort = it }, Modifier.weight(1f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        EchoEyebrow("CONSOLE LINK")
+                        OutlinedButton(
+                            enabled = !isTesting,
+                            onClick = ::saveAndTest,
+                            shape = RoundedCornerShape(999.dp),
+                            border = ButtonDefaults.outlinedButtonBorder(enabled = !isTesting).copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(EchoColors.BorderStrong),
+                            ),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = EchoColors.TextSecondary,
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+                        ) {
+                            if (isTesting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = EchoColors.NeonGreen,
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Outlined.NetworkCheck,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(17.dp),
+                                    tint = EchoColors.NeonGreen,
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("TESTAR", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+
+                    EchoTextField(
+                        value = host,
+                        onValueChange = { host = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "IP ou host",
+                        singleLine = true,
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PortField("NOVA", novaPort, { novaPort = it }, Modifier.weight(1f))
+                        PortField("Aurora", auroraPort, { auroraPort = it }, Modifier.weight(1f))
+                        PortField("FTPdll", ftpDllPort, { ftpDllPort = it }, Modifier.weight(1f))
+                    }
                 }
             }
         }
 
         item {
-            SectionCard(title = "NOVA") {
-                CredentialFields(
-                    username = novaUser,
-                    password = novaPassword,
-                    onUsernameChange = { novaUser = it },
-                    onPasswordChange = { novaPassword = it },
-                )
-                Text(
-                    text = "Nesta fase o app valida a porta NOVA sem consultar endpoints de identidade do console.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            CredentialPanel(
+                title = "NOVA",
+                description = "API local e autenticação do console.",
+                icon = Icons.Outlined.SettingsEthernet,
+                username = novaUser,
+                password = novaPassword,
+                showPassword = showNovaPassword,
+                onUsernameChange = { novaUser = it },
+                onPasswordChange = { novaPassword = it },
+                onTogglePassword = { showNovaPassword = !showNovaPassword },
+            )
         }
 
         item {
-            SectionCard(title = "Aurora FTP — Fast") {
-                CredentialFields(
-                    username = auroraUser,
-                    password = auroraPassword,
-                    onUsernameChange = { auroraUser = it },
-                    onPasswordChange = { auroraPassword = it },
-                )
-            }
+            CredentialPanel(
+                title = "AURORA FTP",
+                description = "Canal rápido para listagem e transferência.",
+                icon = Icons.Outlined.FolderOpen,
+                username = auroraUser,
+                password = auroraPassword,
+                showPassword = showAuroraPassword,
+                onUsernameChange = { auroraUser = it },
+                onPasswordChange = { auroraPassword = it },
+                onTogglePassword = { showAuroraPassword = !showAuroraPassword },
+            )
         }
 
         item {
-            SectionCard(title = "FTPdll — Background") {
-                CredentialFields(
-                    username = ftpDllUser,
-                    password = ftpDllPassword,
-                    onUsernameChange = { ftpDllUser = it },
-                    onPasswordChange = { ftpDllPassword = it },
-                )
-            }
+            CredentialPanel(
+                title = "FTPDLL",
+                description = "Canal de compatibilidade e segundo plano.",
+                icon = Icons.Outlined.Bolt,
+                username = ftpDllUser,
+                password = ftpDllPassword,
+                showPassword = showFtpDllPassword,
+                onUsernameChange = { ftpDllUser = it },
+                onPasswordChange = { ftpDllPassword = it },
+                onTogglePassword = { showFtpDllPassword = !showFtpDllPassword },
+            )
+        }
+
+        item {
+            SecurityInfoPanel()
         }
 
         item {
@@ -167,49 +276,47 @@ fun XboxSystemScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Button(
-                    modifier = Modifier.weight(1f),
+                OutlinedButton(
+                    onClick = ::saveProfile,
+                    modifier = Modifier.weight(1f).height(54.dp),
                     enabled = !isTesting,
-                    onClick = {
-                        val profile = currentProfile()
-                        if (profile == null) {
-                            message = "Revise IP e portas antes de salvar."
-                        } else {
-                            runCatching { store.save(profile) }
-                                .onSuccess { message = "Configuração salva com segurança." }
-                                .onFailure { message = "Não foi possível salvar a configuração." }
-                        }
-                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = ButtonDefaults.outlinedButtonBorder(enabled = !isTesting).copy(
+                        brush = androidx.compose.ui.graphics.SolidColor(EchoColors.BorderStrong),
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = EchoColors.Text,
+                    ),
                 ) {
-                    Text("Salvar")
+                    Icon(Icons.Outlined.Save, contentDescription = null, modifier = Modifier.size(19.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Salvar", style = MaterialTheme.typography.titleMedium)
                 }
 
                 Button(
-                    modifier = Modifier.weight(1f),
+                    onClick = ::saveAndTest,
+                    modifier = Modifier.weight(1f).height(54.dp),
                     enabled = !isTesting,
-                    onClick = {
-                        val profile = currentProfile()
-                        if (profile == null) {
-                            message = "Revise IP e portas antes de testar."
-                        } else {
-                            scope.launch {
-                                isTesting = true
-                                message = null
-                                snapshot = runCatching {
-                                    store.save(profile)
-                                    repository.check(profile)
-                                }.onFailure {
-                                    message = "Falha ao testar o Xbox. Confira a rede e tente novamente."
-                                }.getOrNull()
-                                isTesting = false
-                            }
-                        }
-                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = EchoColors.NeonGreen,
+                        contentColor = EchoColors.Void,
+                    ),
                 ) {
                     if (isTesting) {
-                        CircularProgressIndicator(strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = EchoColors.Void,
+                        )
                     } else {
-                        Text("Salvar e testar")
+                        Icon(Icons.Outlined.NetworkCheck, contentDescription = null, modifier = Modifier.size(19.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Salvar e testar",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black,
+                        )
                     }
                 }
             }
@@ -217,39 +324,202 @@ fun XboxSystemScreen(
 
         message?.let { text ->
             item {
-                Text(
-                    text = text,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                EchoPanel(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = text,
+                        modifier = Modifier.padding(14.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = EchoColors.TextSecondary,
+                    )
+                }
             }
         }
 
         snapshot?.let { result ->
             item {
-                Text(
-                    text = if (result.consoleReachable) "Xbox encontrado" else "Xbox não respondeu",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    EchoEyebrow(if (result.consoleReachable) "CONSOLE ONLINE" else "CONSOLE STATUS")
+                    TransportCard(result.nova)
+                    TransportCard(result.auroraFtp)
+                    TransportCard(result.ftpDll)
+                }
             }
-            item { TransportCard(result.nova) }
-            item { TransportCard(result.auroraFtp) }
-            item { TransportCard(result.ftpDll) }
         }
     }
 }
 
 @Composable
-private fun SectionCard(
+private fun ConsoleHeader() {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                EchoEyebrow("ECHO OS // CONSOLE LINK")
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    text = "Configurar Xbox",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = EchoColors.Text,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            SecurePill()
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Conexão local do Echo360 com credenciais protegidas pelo Android Keystore.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = EchoColors.TextSecondary,
+        )
+    }
+}
+
+@Composable
+private fun SecurePill() {
+    Row(
+        modifier = Modifier
+            .background(EchoColors.NeonGreen.copy(alpha = 0.08f), RoundedCornerShape(999.dp))
+            .border(1.dp, EchoColors.NeonGreen.copy(alpha = 0.42f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.Security,
+            contentDescription = null,
+            tint = EchoColors.NeonGreen,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = "SECURE",
+            style = MaterialTheme.typography.labelMedium,
+            color = EchoColors.NeonGreen,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun CredentialPanel(
     title: String,
-    content: @Composable ColumnScope.() -> Unit,
+    description: String,
+    icon: ImageVector,
+    username: String,
+    password: String,
+    showPassword: Boolean,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onTogglePassword: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    EchoPanel(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            content = content,
-        )
+            verticalArrangement = Arrangement.spacedBy(13.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .background(EchoColors.NeonGreen.copy(alpha = 0.08f), RoundedCornerShape(13.dp))
+                        .border(1.dp, EchoColors.NeonGreen.copy(alpha = 0.26f), RoundedCornerShape(13.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = EchoColors.NeonGreen,
+                        modifier = Modifier.size(25.dp),
+                    )
+                }
+                Spacer(Modifier.width(13.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = EchoColors.NeonGreen,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = EchoColors.TextSecondary,
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                EchoTextField(
+                    value = username,
+                    onValueChange = onUsernameChange,
+                    modifier = Modifier.weight(1f),
+                    label = "Usuário",
+                    singleLine = true,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Person,
+                            contentDescription = null,
+                            tint = EchoColors.TextSecondary,
+                        )
+                    },
+                )
+                EchoTextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    modifier = Modifier.weight(1f),
+                    label = "Senha",
+                    singleLine = true,
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Lock,
+                            contentDescription = null,
+                            tint = EchoColors.TextSecondary,
+                        )
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = onTogglePassword) {
+                            Icon(
+                                imageVector = if (showPassword) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (showPassword) "Ocultar senha" else "Mostrar senha",
+                                tint = EchoColors.TextSecondary,
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SecurityInfoPanel() {
+    EchoPanel(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Info,
+                contentDescription = null,
+                tint = EchoColors.NeonGreen,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = "As três conexões compartilham a mesma camada segura do Echo360.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = EchoColors.TextSecondary,
+            )
+        }
     }
 }
 
@@ -260,38 +530,58 @@ private fun PortField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedTextField(
+    EchoTextField(
         value = value,
         onValueChange = { input -> onValueChange(input.filter(Char::isDigit).take(5)) },
         modifier = modifier,
-        label = { Text(label) },
+        label = label,
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        trailingIcon = {
+            Icon(
+                imageVector = Icons.Outlined.SettingsEthernet,
+                contentDescription = null,
+                tint = EchoColors.NeonGreen,
+                modifier = Modifier.size(18.dp),
+            )
+        },
     )
 }
 
 @Composable
-private fun CredentialFields(
-    username: String,
-    password: String,
-    onUsernameChange: (String) -> Unit,
-    onPasswordChange: (String) -> Unit,
+private fun EchoTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String,
+    singleLine: Boolean,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    leadingIcon: (@Composable (() -> Unit))? = null,
+    trailingIcon: (@Composable (() -> Unit))? = null,
 ) {
     OutlinedTextField(
-        value = username,
-        onValueChange = onUsernameChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text("Usuário") },
-        singleLine = true,
-    )
-    OutlinedTextField(
-        value = password,
-        onValueChange = onPasswordChange,
-        modifier = Modifier.fillMaxWidth(),
-        label = { Text("Senha") },
-        singleLine = true,
-        visualTransformation = PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        label = { Text(label) },
+        singleLine = singleLine,
+        visualTransformation = visualTransformation,
+        keyboardOptions = keyboardOptions,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        shape = RoundedCornerShape(10.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = EchoColors.Text,
+            unfocusedTextColor = EchoColors.Text,
+            focusedContainerColor = EchoColors.VoidRaised.copy(alpha = 0.72f),
+            unfocusedContainerColor = EchoColors.VoidRaised.copy(alpha = 0.72f),
+            focusedBorderColor = EchoColors.NeonGreen.copy(alpha = 0.62f),
+            unfocusedBorderColor = EchoColors.BorderStrong,
+            focusedLabelColor = EchoColors.NeonGreen,
+            unfocusedLabelColor = EchoColors.TextSecondary,
+            cursorColor = EchoColors.NeonGreen,
+        ),
     )
 }
 
@@ -299,8 +589,8 @@ private fun CredentialFields(
 private fun TransportCard(health: TransportHealth) {
     val title = when (health.transport) {
         XboxTransport.Nova -> "NOVA"
-        XboxTransport.AuroraFtp -> "Aurora FTP"
-        XboxTransport.FtpDll -> "FTPdll"
+        XboxTransport.AuroraFtp -> "AURORA FTP"
+        XboxTransport.FtpDll -> "FTPDLL"
     }
 
     val status = when (health.status) {
@@ -312,30 +602,39 @@ private fun TransportCard(health: TransportHealth) {
         TransportStatus.ProtocolError -> "Erro de protocolo"
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+    val healthy = health.status == TransportStatus.Connected
+
+    EchoPanel(modifier = Modifier.fillMaxWidth(), highlighted = healthy) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, style = MaterialTheme.typography.labelLarge)
-            Text(
-                text = status,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (health.status == TransportStatus.Connected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                },
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .background(
+                        if (healthy) EchoColors.NeonGreen else EchoColors.TextMuted,
+                        RoundedCornerShape(999.dp),
+                    ),
             )
-            Text(
-                text = buildString {
-                    append(health.detail)
-                    health.latencyMs?.let { append(" • ${it} ms") }
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "$title // $status",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (healthy) EchoColors.NeonGreen else EchoColors.Text,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = buildString {
+                        append(health.detail)
+                        health.latencyMs?.let { append(" • ${it} ms") }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = EchoColors.TextSecondary,
+                )
+            }
         }
     }
 }
