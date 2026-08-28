@@ -132,12 +132,12 @@ class XboxConnectionRepository(
         elapsedMs: Long,
     ): TransportHealth {
         val protocol = error as? FtpProtocolException
+        val ftpCode = protocol?.ftpCode
         val status = when {
-            protocol?.ftpCode == 421 -> TransportStatus.Busy
-            protocol?.ftpCode == 530 -> TransportStatus.AuthFailed
-            protocol != null &&
-                protocol.ftpCode in 500..599 &&
-                protocol.message.orEmpty().contains("login", ignoreCase = true) -> TransportStatus.AuthFailed
+            ftpCode == 421 -> TransportStatus.Busy
+            ftpCode == 530 -> TransportStatus.AuthFailed
+            (ftpCode ?: 0) in 500..599 &&
+                protocol?.message.orEmpty().contains("login", ignoreCase = true) -> TransportStatus.AuthFailed
             error is ConnectException -> TransportStatus.Unreachable
             error is SocketTimeoutException -> TransportStatus.Unreachable
             error is EOFException -> TransportStatus.ProtocolError
@@ -146,11 +146,11 @@ class XboxConnectionRepository(
         }
 
         val detail = when {
-            protocol?.ftpCode == 421 ->
+            ftpCode == 421 ->
                 "FTP $port respondeu 421: limite de conexões atingido. Feche outras sessões e teste novamente."
 
             status == TransportStatus.AuthFailed ->
-                "FTP $port recusou usuário/senha${protocol?.ftpCode?.let { " (código $it)" }.orEmpty()}."
+                "FTP $port recusou usuário/senha${ftpCode?.let { " (código $it)" }.orEmpty()}."
 
             error is ConnectException ->
                 "Conexão recusada na porta $port. O serviço FTP parece não estar escutando nessa porta."
@@ -162,7 +162,7 @@ class XboxConnectionRepository(
                 "A porta $port aceitou a conexão, mas o servidor FTP fechou o canal sem concluir a resposta."
 
             protocol != null ->
-                "FTP $port respondeu ${protocol.ftpCode ?: "sem código"}: ${protocol.message ?: "erro de protocolo"}"
+                "FTP $port respondeu ${ftpCode ?: "sem código"}: ${protocol.message ?: "erro de protocolo"}"
 
             error is IOException ->
                 "Falha de rede na porta $port: ${error.message ?: error.javaClass.simpleName}."
