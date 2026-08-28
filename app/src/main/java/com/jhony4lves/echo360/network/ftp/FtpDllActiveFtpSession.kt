@@ -10,6 +10,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.SocketTimeoutException
 
 class FtpDllActiveFtpSession private constructor(
     private val channel: FtpCommandChannel,
@@ -27,11 +28,21 @@ class FtpDllActiveFtpSession private constructor(
                 channel.send("LIST")
                 requirePreliminary(channel.read(), "FTPdll não iniciou LIST.")
 
-                listener.accept().use { dataSocket ->
-                    dataSocket.soTimeout = timeoutMs
-                    val lines = dataSocket.getInputStream()
-                        .bufferedReader(Charsets.UTF_8)
-                        .readLines()
+                val dataSocket = try {
+                    listener.accept()
+                } catch (error: SocketTimeoutException) {
+                    throw FtpStageTimeoutException("aguardando conexão ativa do Xbox após PORT", error)
+                }
+
+                dataSocket.use { socket ->
+                    socket.soTimeout = timeoutMs
+                    val lines = try {
+                        socket.getInputStream()
+                            .bufferedReader(Charsets.UTF_8)
+                            .readLines()
+                    } catch (error: SocketTimeoutException) {
+                        throw FtpStageTimeoutException("recebendo dados do LIST ativo", error)
+                    }
                     requirePositive(channel.read(), "FTPdll não concluiu LIST.")
 
                     val parsed = UnixFtpListParser.parse(lines, canonical)
@@ -75,9 +86,15 @@ class FtpDllActiveFtpSession private constructor(
                     channel.send("STOR $remote")
                     requirePreliminary(channel.read(), "FTPdll não iniciou STOR.")
 
-                    listener.accept().use { dataSocket ->
-                        dataSocket.soTimeout = timeoutMs
-                        dataSocket.getOutputStream().use { output ->
+                    val dataSocket = try {
+                        listener.accept()
+                    } catch (error: SocketTimeoutException) {
+                        throw FtpStageTimeoutException("aguardando conexão ativa do Xbox para STOR", error)
+                    }
+
+                    dataSocket.use { socket ->
+                        socket.soTimeout = timeoutMs
+                        socket.getOutputStream().use { output ->
                             copyActiveWithProgress(input, output, onProgress)
                         }
                     }
@@ -99,9 +116,15 @@ class FtpDllActiveFtpSession private constructor(
                 channel.send("RETR $remote")
                 requirePreliminary(channel.read(), "FTPdll não iniciou RETR.")
 
-                listener.accept().use { dataSocket ->
-                    dataSocket.soTimeout = timeoutMs
-                    dataSocket.getInputStream().use { input ->
+                val dataSocket = try {
+                    listener.accept()
+                } catch (error: SocketTimeoutException) {
+                    throw FtpStageTimeoutException("aguardando conexão ativa do Xbox para RETR", error)
+                }
+
+                dataSocket.use { socket ->
+                    socket.soTimeout = timeoutMs
+                    socket.getInputStream().use { input ->
                         copyActiveWithProgress(input, destination, onProgress)
                     }
                 }
