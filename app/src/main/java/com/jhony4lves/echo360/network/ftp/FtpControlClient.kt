@@ -39,8 +39,7 @@ class FtpControlClient(
 
         val channel = FtpCommandChannel(host, port, timeoutMs)
         val attempt = runCatching {
-            var elapsed = 0L
-            elapsed = measureTimeMillis {
+            val elapsed = measureTimeMillis {
                 channel.connectAndLogin(username, password)
             }
             FtpLoginResult(
@@ -62,7 +61,7 @@ class FtpControlClient(
                         "Servidor FTP atingiu o limite de conexões.",
                     )
 
-                    error.ftpCode in 500..599 -> FtpLoginResult(
+                    (error.ftpCode ?: 0) in 500..599 -> FtpLoginResult(
                         FtpLoginStatus.AuthFailed,
                         error.ftpCode,
                         "Login FTP recusado.",
