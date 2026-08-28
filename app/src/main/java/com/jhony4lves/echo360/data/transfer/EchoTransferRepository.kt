@@ -6,13 +6,20 @@ import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
 import com.jhony4lves.echo360.domain.transfer.LocalTransferTree
 import com.jhony4lves.echo360.domain.transfer.RemoteTransferFile
 import com.jhony4lves.echo360.domain.transfer.TransferAnalysis
+import com.jhony4lves.echo360.domain.transfer.TransferCancellationToken
 import com.jhony4lves.echo360.domain.transfer.TransferCompareEngine
+import com.jhony4lves.echo360.domain.transfer.TransferDiffKind
+import com.jhony4lves.echo360.domain.transfer.TransferExecutionProgress
+import com.jhony4lves.echo360.domain.transfer.TransferExecutionResult
+import com.jhony4lves.echo360.domain.transfer.TransferExecutionStatus
+import com.jhony4lves.echo360.domain.transfer.TransferDiffItem
 import com.jhony4lves.echo360.domain.xbox.XboxPath
 import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.network.ftp.FtpRoute
 import com.jhony4lves.echo360.network.ftp.RemoteEntry
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
+import kotlin.math.roundToLong
 
 class EchoTransferRepository(
     context: Context,
@@ -58,6 +65,278 @@ class EchoTransferRepository(
             fallbackReason = remoteResult.fallbackReason,
             remoteFiles = remoteResult.files,
         )
+    }
+
+    /**
+     * Executes only Missing/Different items from a previously generated analysis.
+     *
+     * The same FTP session is reused for the queue. In Auto mode, a Fast failure
+     * closes the Aurora session and retries the current file from byte zero using
+     * FTPdll Background. Every successful STOR is verified with a remote SIZE.
+     */
+    suspend fun execute(
+        analysis: TransferAnalysis,
+        cancellationToken: TransferCancellationToken = TransferCancellationToken(),
+        onProgress: (TransferExecutionProgress) -> Unit = {},
+    ): TransferExecutionResult {
+        val queue = analysis.items.filter { it.kind != TransferDiffKind.Same }
+        if (queue.isEmpty()) {
+            onProgress(
+                TransferExecutionProgress(
+                    status = TransferExecutionStatus.Completed,
+                    route = analysis.usedRoute,
+                    fileCount = 0,
+                    verifiedFiles = 0,
+                    totalBytes = 0L,
+                    message = "Nada para enviar.",
+                ),
+            )
+            return TransferExecutionResult(
+                status = TransferExecutionStatus.Completed,
+                route = analysis.usedRoute,
+                uploadedFiles = 0,
+                verifiedFiles = 0,
+                transferredBytes = 0L,
+                fallbackReason = analysis.fallbackReason,
+                message = "Nada para enviar.",
+            )
+        }
+
+        val profile = configuredProfile()
+        val totalBytes = queue.sumOf { it.local.size }
+        val startedAt = System.nanoTime()
+
+        var session: XboxFtpSession? = null
+        var activeRoute: FtpRoute? = null
+        var fallbackReason = analysis.fallbackReason
+        var completedBytes = 0L
+        var verifiedFiles = 0
+        var lastProgressAt = 0L
+        var currentFile: String? = null
+
+        fun emit(
+            status: TransferExecutionStatus,
+            item: TransferDiffItem? = null,
+            fileIndex: Int = 0,
+            currentBytes: Long = 0L,
+            message: String? = null,
+            force: Boolean = false,
+        ) {
+            val now = System.nanoTime()
+            if (!force && status == TransferExecutionStatus.Uploading) {
+                val elapsedSinceLast = now - lastProgressAt
+                if (elapsedSinceLast < 120_000_000L && currentBytes < (item?.local?.size ?: Long.MAX_VALUE)) {
+                    return
+                }
+            }
+            lastProgressAt = now
+
+            val elapsedSeconds = ((now - startedAt).coerceAtLeast(1L) / 1_000_000_000.0)
+            val logicalBytes = (completedBytes + currentBytes).coerceAtMost(totalBytes)
+            val speed = (logicalBytes / elapsedSeconds).roundToLong().coerceAtLeast(0L)
+            val remaining = (totalBytes - logicalBytes).coerceAtLeast(0L)
+            val eta = if (speed > 0L) (remaining / speed).coerceAtLeast(0L) else null
+
+            onProgress(
+                TransferExecutionProgress(
+                    status = status,
+                    route = activeRoute,
+                    currentFile = item?.relativePath,
+                    fileIndex = fileIndex,
+                    fileCount = queue.size,
+                    currentFileBytes = currentBytes,
+                    currentFileSize = item?.local?.size ?: 0L,
+                    completedBytes = completedBytes,
+                    totalBytes = totalBytes,
+                    verifiedFiles = verifiedFiles,
+                    bytesPerSecond = speed,
+                    etaSeconds = eta,
+                    fallbackReason = fallbackReason,
+                    message = message,
+                ),
+            )
+        }
+
+        suspend fun closeCurrentSession() {
+            val current = session
+            session = null
+            activeRoute = null
+            if (current != null) runCatching { current.close() }
+        }
+
+        suspend fun connect(route: FtpRoute) {
+            val routed = sessionFactory.connect(profile, route)
+            session = routed.session
+            activeRoute = routed.route
+            routed.fallbackReason?.let { reason -> fallbackReason = reason }
+        }
+
+        fun cancelledResult(): TransferExecutionResult = TransferExecutionResult(
+            status = TransferExecutionStatus.Cancelled,
+            route = activeRoute,
+            uploadedFiles = verifiedFiles,
+            verifiedFiles = verifiedFiles,
+            transferredBytes = completedBytes,
+            fallbackReason = fallbackReason,
+            failedFile = currentFile,
+            message = "Transferência cancelada.",
+        )
+
+        try {
+            emit(
+                status = TransferExecutionStatus.Preparing,
+                message = "Abrindo conexão para ${queue.size} arquivo(s).",
+                force = true,
+            )
+
+            if (cancellationToken.isCancelled()) return cancelledResult()
+            connect(analysis.requestedRoute)
+
+            queue.forEachIndexed { index, item ->
+                currentFile = item.relativePath
+                if (cancellationToken.isCancelled()) throw TransferCancelledSignal
+
+                var retriedInBackground = false
+                while (true) {
+                    if (cancellationToken.isCancelled()) throw TransferCancelledSignal
+                    val currentSession = checkNotNull(session) { "Sessão FTP não está aberta." }
+                    val targetPath = remoteTarget(analysis.remoteRoot, item.relativePath)
+
+                    try {
+                        emit(
+                            status = TransferExecutionStatus.Uploading,
+                            item = item,
+                            fileIndex = index + 1,
+                            currentBytes = 0L,
+                            message = "Enviando ${item.relativePath}",
+                            force = true,
+                        )
+
+                        val input = appContext.contentResolver.openInputStream(Uri.parse(item.local.contentUri))
+                            ?: error("Não foi possível abrir ${item.relativePath} no Android.")
+
+                        currentSession.upload(targetPath, input) { sent ->
+                            if (cancellationToken.isCancelled()) throw TransferCancelledSignal
+                            emit(
+                                status = TransferExecutionStatus.Uploading,
+                                item = item,
+                                fileIndex = index + 1,
+                                currentBytes = sent,
+                            )
+                        }
+
+                        emit(
+                            status = TransferExecutionStatus.Verifying,
+                            item = item,
+                            fileIndex = index + 1,
+                            currentBytes = item.local.size,
+                            message = "Verificando SIZE remoto.",
+                            force = true,
+                        )
+
+                        val remoteSize = currentSession.size(targetPath)
+                        if (remoteSize != item.local.size) {
+                            throw TransferVerificationException(
+                                "SIZE inválido para ${item.relativePath}: esperado ${item.local.size}, recebido ${remoteSize ?: "indisponível"}.",
+                            )
+                        }
+
+                        completedBytes += item.local.size
+                        verifiedFiles += 1
+                        emit(
+                            status = TransferExecutionStatus.Verifying,
+                            item = item,
+                            fileIndex = index + 1,
+                            currentBytes = 0L,
+                            message = "Arquivo verificado.",
+                            force = true,
+                        )
+                        break
+                    } catch (cancelled: TransferCancelledSignal) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        val canFallback = analysis.requestedRoute == FtpRoute.Auto &&
+                            activeRoute == FtpRoute.Fast &&
+                            !retriedInBackground
+
+                        if (!canFallback) {
+                            emit(
+                                status = TransferExecutionStatus.Failed,
+                                item = item,
+                                fileIndex = index + 1,
+                                message = error.message ?: "Falha durante a transferência.",
+                                force = true,
+                            )
+                            return TransferExecutionResult(
+                                status = TransferExecutionStatus.Failed,
+                                route = activeRoute,
+                                uploadedFiles = verifiedFiles,
+                                verifiedFiles = verifiedFiles,
+                                transferredBytes = completedBytes,
+                                fallbackReason = fallbackReason,
+                                failedFile = item.relativePath,
+                                message = error.message ?: "Falha durante a transferência.",
+                            )
+                        }
+
+                        retriedInBackground = true
+                        val reason = error.message ?: "Aurora FTP falhou durante o envio."
+                        fallbackReason = "Fast → Background: $reason"
+                        closeCurrentSession()
+                        emit(
+                            status = TransferExecutionStatus.Preparing,
+                            item = item,
+                            fileIndex = index + 1,
+                            message = "Fast indisponível. Reabrindo pelo FTPdll e reiniciando o arquivo.",
+                            force = true,
+                        )
+                        connect(FtpRoute.Background)
+                    }
+                }
+            }
+
+            currentFile = null
+            emit(
+                status = TransferExecutionStatus.Completed,
+                fileIndex = queue.size,
+                message = "$verifiedFiles arquivo(s) enviados e verificados.",
+                force = true,
+            )
+            return TransferExecutionResult(
+                status = TransferExecutionStatus.Completed,
+                route = activeRoute,
+                uploadedFiles = verifiedFiles,
+                verifiedFiles = verifiedFiles,
+                transferredBytes = completedBytes,
+                fallbackReason = fallbackReason,
+                message = "$verifiedFiles arquivo(s) enviados e verificados.",
+            )
+        } catch (_: TransferCancelledSignal) {
+            emit(
+                status = TransferExecutionStatus.Cancelled,
+                message = "Cancelando e fechando a sessão FTP.",
+                force = true,
+            )
+            return cancelledResult()
+        } catch (error: Throwable) {
+            emit(
+                status = TransferExecutionStatus.Failed,
+                message = error.message ?: "Não foi possível iniciar a transferência.",
+                force = true,
+            )
+            return TransferExecutionResult(
+                status = TransferExecutionStatus.Failed,
+                route = activeRoute,
+                uploadedFiles = verifiedFiles,
+                verifiedFiles = verifiedFiles,
+                transferredBytes = completedBytes,
+                fallbackReason = fallbackReason,
+                failedFile = currentFile,
+                message = error.message ?: "Não foi possível iniciar a transferência.",
+            )
+        } finally {
+            closeCurrentSession()
+        }
     }
 
     fun openRemoteBrowser(requestedRoute: FtpRoute): RemoteFolderBrowser =
@@ -166,6 +445,15 @@ class RemoteFolderBrowser internal constructor(
         if (current != null) runCatching { current.close() }
     }
 }
+
+private fun remoteTarget(remoteRoot: String, relativePath: String): String =
+    XboxPath.canonical(
+        XboxPath.canonical(remoteRoot).trimEnd('/') + "/" + relativePath.replace('\\', '/').trim('/'),
+    )
+
+private class TransferVerificationException(message: String) : IllegalStateException(message)
+
+private object TransferCancelledSignal : RuntimeException(null, null, false, false)
 
 private data class RemoteScanResult(
     val route: FtpRoute,
