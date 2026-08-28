@@ -1,6 +1,7 @@
 package com.jhony4lves.echo360.network.ftp
 
 import java.io.InputStream
+import java.io.OutputStream
 
 data class RemoteEntry(
     val name: String,
@@ -22,6 +23,16 @@ interface XboxFtpSession {
     suspend fun upload(
         canonicalPath: String,
         source: InputStream,
+        onProgress: (Long) -> Unit = {},
+    )
+
+    /**
+     * Copies a remote file into [destination]. The destination is flushed but not
+     * closed by the session, so callers remain responsible for its lifecycle.
+     */
+    suspend fun download(
+        canonicalPath: String,
+        destination: OutputStream,
         onProgress: (Long) -> Unit = {},
     )
 
