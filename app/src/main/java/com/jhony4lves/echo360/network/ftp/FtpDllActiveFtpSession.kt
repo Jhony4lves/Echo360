@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 
@@ -34,11 +35,7 @@ class FtpDllActiveFtpSession private constructor(
                     requirePositive(channel.read(), "FTPdll não concluiu LIST.")
 
                     val parsed = UnixFtpListParser.parse(lines, canonical)
-                    if (canonical == "/") {
-                        parsed.map(::canonicalizeRootEntry)
-                    } else {
-                        parsed
-                    }
+                    if (canonical == "/") parsed.map(::canonicalizeRootEntry) else parsed
                 }
             }
         }
@@ -87,6 +84,30 @@ class FtpDllActiveFtpSession private constructor(
 
                     requirePositive(channel.read(), "FTPdll não concluiu STOR.")
                 }
+            }
+        }
+    }
+
+    override suspend fun download(
+        canonicalPath: String,
+        destination: OutputStream,
+        onProgress: (Long) -> Unit,
+    ) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val remote = XboxPath.toFtpDllPath(XboxPath.canonical(canonicalPath))
+            prepareActiveListener().use { listener ->
+                channel.send("RETR $remote")
+                requirePreliminary(channel.read(), "FTPdll não iniciou RETR.")
+
+                listener.accept().use { dataSocket ->
+                    dataSocket.soTimeout = timeoutMs
+                    dataSocket.getInputStream().use { input ->
+                        copyActiveWithProgress(input, destination, onProgress)
+                    }
+                }
+
+                destination.flush()
+                requirePositive(channel.read(), "FTPdll não concluiu RETR.")
             }
         }
     }
@@ -187,7 +208,7 @@ private fun requirePreliminary(reply: FtpReply, message: String) {
 
 private fun copyActiveWithProgress(
     input: InputStream,
-    output: java.io.OutputStream,
+    output: OutputStream,
     onProgress: (Long) -> Unit,
 ) {
     val buffer = ByteArray(256 * 1024)

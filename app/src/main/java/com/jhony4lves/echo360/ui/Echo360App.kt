@@ -38,6 +38,7 @@ import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.components.EchoNavGlyph
 import com.jhony4lves.echo360.ui.components.EchoPanel
 import com.jhony4lves.echo360.ui.components.EchoStatusPill
+import com.jhony4lves.echo360.ui.library.EchoLibraryScreen
 import com.jhony4lves.echo360.ui.system.XboxSystemScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
 import com.jhony4lves.echo360.ui.theme.EchoTheme
@@ -71,18 +72,8 @@ fun Echo360App() {
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = { destination = item },
-                                icon = {
-                                    EchoNavGlyph(
-                                        label = item.code,
-                                        selected = selected,
-                                    )
-                                },
-                                label = {
-                                    Text(
-                                        text = item.shortLabel,
-                                        style = MaterialTheme.typography.labelMedium,
-                                    )
-                                },
+                                icon = { EchoNavGlyph(label = item.code, selected = selected) },
+                                label = { Text(item.shortLabel, style = MaterialTheme.typography.labelMedium) },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = EchoColors.NeonGreen,
                                     selectedTextColor = EchoColors.NeonGreen,
@@ -103,10 +94,7 @@ fun Echo360App() {
                         onOpenSystem = { destination = EchoDestination.System },
                     )
 
-                    EchoDestination.Library -> FuturisticPlaceholderScreen(
-                        eyebrow = "ECHO LIBRARY",
-                        title = "Sua biblioteca vira o launcher.",
-                        description = "Capas, sessões, favoritos, backlog, Title ID, Media ID e TU vão morar aqui com foco primeiro no jogador.",
+                    EchoDestination.Library -> EchoLibraryScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
 
@@ -154,11 +142,7 @@ private fun HeroHeader() {
             Column {
                 EchoEyebrow("ECHO OS // MOBILE LINK")
                 Spacer(Modifier.height(5.dp))
-                Text(
-                    text = "ECHO//360",
-                    style = MaterialTheme.typography.displaySmall,
-                    color = EchoColors.Text,
-                )
+                Text("ECHO//360", style = MaterialTheme.typography.displaySmall, color = EchoColors.Text)
             }
             EchoStatusPill(text = "ALPHA", active = true)
         }
@@ -173,19 +157,13 @@ private fun HeroHeader() {
 
 @Composable
 private fun ConsoleCommandCard(onOpenSystem: () -> Unit) {
-    EchoPanel(
-        modifier = Modifier.fillMaxWidth(),
-        highlighted = true,
-    ) {
+    EchoPanel(modifier = Modifier.fillMaxWidth(), highlighted = true) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     Brush.horizontalGradient(
-                        listOf(
-                            EchoColors.XboxGreen.copy(alpha = 0.13f),
-                            EchoColors.SurfaceHigh,
-                        ),
+                        listOf(EchoColors.XboxGreen.copy(alpha = 0.13f), EchoColors.SurfaceHigh),
                     ),
                 )
                 .padding(18.dp),
@@ -212,10 +190,7 @@ private fun ConsoleCommandCard(onOpenSystem: () -> Unit) {
                     color = EchoColors.TextSecondary,
                 )
                 Spacer(Modifier.height(16.dp))
-                EchoPrimaryButton(
-                    text = "CONFIGURAR XBOX",
-                    onClick = onOpenSystem,
-                )
+                EchoPrimaryButton(text = "CONFIGURAR XBOX", onClick = onOpenSystem)
             }
         }
     }
@@ -231,11 +206,7 @@ private fun ContinuePlayingCard(onOpenLibrary: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 EchoEyebrow("CONTINUAR JOGANDO")
-                Text(
-                    text = "SESSION // --",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = EchoColors.TextMuted,
-                )
+                Text("NOVA // READY", style = MaterialTheme.typography.labelMedium, color = EchoColors.TextMuted)
             }
             Spacer(Modifier.height(14.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -244,10 +215,7 @@ private fun ContinuePlayingCard(onOpenLibrary: () -> Unit) {
                         .size(56.dp)
                         .background(
                             brush = Brush.radialGradient(
-                                listOf(
-                                    EchoColors.NeonGreen.copy(alpha = 0.28f),
-                                    EchoColors.SurfaceBright,
-                                ),
+                                listOf(EchoColors.NeonGreen.copy(alpha = 0.28f), EchoColors.SurfaceBright),
                             ),
                             shape = RoundedCornerShape(14.dp),
                         ),
@@ -263,23 +231,20 @@ private fun ContinuePlayingCard(onOpenLibrary: () -> Unit) {
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Aguardando primeira sessão",
+                        text = "Biblioteca e jogo atual",
                         style = MaterialTheme.typography.titleLarge,
                         color = EchoColors.Text,
                     )
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        text = "O EchoLibrary vai preencher este painel com seu último jogo, tempo e progresso.",
+                        text = "O EchoLibrary agora lê o catálogo do Aurora e consulta o título em execução pela NOVA.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = EchoColors.TextSecondary,
                     )
                 }
             }
             Spacer(Modifier.height(16.dp))
-            EchoSecondaryButton(
-                text = "ABRIR BIBLIOTECA",
-                onClick = onOpenLibrary,
-            )
+            EchoSecondaryButton(text = "ABRIR BIBLIOTECA", onClick = onOpenLibrary)
         }
     }
 }
@@ -299,7 +264,7 @@ private fun QuickActions(
             QuickActionTile(
                 code = "LB",
                 title = "Biblioteca",
-                subtitle = "Jogos e sessões",
+                subtitle = "Catálogo + NOVA",
                 modifier = Modifier.weight(1f),
                 onClick = onOpenLibrary,
             )
@@ -331,16 +296,8 @@ private fun QuickActionTile(
                 fontWeight = FontWeight.Black,
             )
             Spacer(Modifier.height(18.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = EchoColors.Text,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelMedium,
-                color = EchoColors.TextMuted,
-            )
+            Text(text = title, style = MaterialTheme.typography.titleMedium, color = EchoColors.Text)
+            Text(text = subtitle, style = MaterialTheme.typography.labelMedium, color = EchoColors.TextMuted)
             Spacer(Modifier.height(12.dp))
             Button(
                 onClick = onClick,
@@ -363,14 +320,10 @@ private fun BuildStatusCard() {
         Column(modifier = Modifier.padding(18.dp)) {
             EchoEyebrow("BUILD CHANNEL")
             Spacer(Modifier.height(10.dp))
-            Text(
-                text = "Native Transfer Stack",
-                style = MaterialTheme.typography.titleLarge,
-                color = EchoColors.Text,
-            )
+            Text("Player Stack", style = MaterialTheme.typography.titleLarge, color = EchoColors.Text)
             Spacer(Modifier.height(5.dp))
             Text(
-                text = "Conectividade → comparação → upload → Library",
+                text = "Conectividade → Transfer → Library → Doctor",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
@@ -383,7 +336,7 @@ private fun BuildStatusCard() {
                 PhaseChip("FTP", true)
                 PhaseChip("CMP", true)
                 PhaseChip("UP", true)
-                PhaseChip("LIB", false)
+                PhaseChip("LIB", true)
             }
         }
     }
@@ -394,11 +347,7 @@ private fun PhaseChip(text: String, active: Boolean) {
     Box(
         modifier = Modifier
             .background(
-                color = if (active) {
-                    EchoColors.NeonGreen.copy(alpha = 0.10f)
-                } else {
-                    EchoColors.SurfaceBright
-                },
+                color = if (active) EchoColors.NeonGreen.copy(alpha = 0.10f) else EchoColors.SurfaceBright,
                 shape = RoundedCornerShape(8.dp),
             )
             .padding(horizontal = 9.dp, vertical = 6.dp),
@@ -422,11 +371,7 @@ private fun EchoPrimaryButton(text: String, onClick: () -> Unit) {
             contentColor = EchoColors.Void,
         ),
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Black,
-        )
+        Text(text = text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black)
     }
 }
 
@@ -441,41 +386,5 @@ private fun EchoSecondaryButton(text: String, onClick: () -> Unit) {
         ),
     ) {
         Text(text = text, style = MaterialTheme.typography.labelLarge)
-    }
-}
-
-@Composable
-private fun FuturisticPlaceholderScreen(
-    eyebrow: String,
-    title: String,
-    description: String,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(18.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        EchoPanel(
-            modifier = Modifier.fillMaxWidth(),
-            highlighted = true,
-        ) {
-            Column(modifier = Modifier.padding(22.dp)) {
-                EchoEyebrow(eyebrow)
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = EchoColors.Text,
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = EchoColors.TextSecondary,
-                )
-            }
-        }
     }
 }
