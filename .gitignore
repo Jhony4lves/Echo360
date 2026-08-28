@@ -1,0 +1,26 @@
+# Android / Gradle
+.gradle/
+build/
+**/build/
+local.properties
+*.iml
+.idea/
+
+# Signing / credentials
+*.jks
+*.keystore
+keystore.properties
+secrets.properties
+config.json
+.env
+.env.*
+
+# Runtime / transfer history
+node_modules/
+data/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
