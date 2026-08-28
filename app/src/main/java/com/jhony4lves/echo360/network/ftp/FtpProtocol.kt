@@ -8,6 +8,7 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 
 internal data class FtpReply(
     val code: Int,
@@ -44,6 +45,11 @@ internal class FtpProtocolException(
     message: String,
 ) : IOException(message)
 
+internal class FtpStageTimeoutException(
+    val stage: String,
+    cause: SocketTimeoutException,
+) : IOException("Timeout em $stage.", cause)
+
 internal class FtpCommandChannel(
     private val host: String,
     private val port: Int,
@@ -52,6 +58,7 @@ internal class FtpCommandChannel(
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
+    private var expectedReplyStage: String = "resposta FTP"
 
     val localAddress: InetAddress
         get() = requireSocket().localAddress
@@ -67,12 +74,17 @@ internal class FtpCommandChannel(
             soTimeout = timeoutMs
             keepAlive = true
             tcpNoDelay = true
-            connect(InetSocketAddress(host, port), timeoutMs)
+            try {
+                connect(InetSocketAddress(host, port), timeoutMs)
+            } catch (error: SocketTimeoutException) {
+                throw FtpStageTimeoutException("conexão TCP de controle", error)
+            }
         }
         socket = connected
         reader = connected.getInputStream().bufferedReader(Charsets.US_ASCII)
         writer = connected.getOutputStream().bufferedWriter(Charsets.US_ASCII)
 
+        expectedReplyStage = "banner FTP"
         val banner = read()
         if (banner.code == 421) {
             throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
@@ -81,12 +93,12 @@ internal class FtpCommandChannel(
             throw FtpProtocolException(banner.code, "Servidor FTP recusou a conexão.")
         }
 
-        send("USER $username")
+        send("USER $username", "resposta USER")
         val userReply = read()
         when (userReply.code) {
             230 -> Unit
             331 -> {
-                send("PASS $password")
+                send("PASS $password", "resposta PASS")
                 val passReply = read()
                 if (passReply.code == 421) {
                     throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
@@ -106,12 +118,19 @@ internal class FtpCommandChannel(
     }
 
     fun command(command: String): FtpReply {
-        send(command)
+        val verb = command.substringBefore(' ').uppercase()
+        send(command, "resposta $verb")
         return read()
     }
 
     fun send(command: String) {
+        val verb = command.substringBefore(' ').uppercase()
+        send(command, "resposta $verb")
+    }
+
+    private fun send(command: String, replyStage: String) {
         val output = writer ?: throw IOException("Canal FTP não conectado.")
+        expectedReplyStage = replyStage
         output.write(command)
         output.write("\r\n")
         output.flush()
@@ -119,13 +138,17 @@ internal class FtpCommandChannel(
 
     fun read(): FtpReply {
         val input = reader ?: throw IOException("Canal FTP não conectado.")
-        return FtpReplyParser.read(input)
+        return try {
+            FtpReplyParser.read(input)
+        } catch (error: SocketTimeoutException) {
+            throw FtpStageTimeoutException(expectedReplyStage, error)
+        }
     }
 
     override fun close() {
         if (socket == null) return
         runCatching {
-            send("QUIT")
+            send("QUIT", "resposta QUIT")
             read()
         }
         runCatching { reader?.close() }
