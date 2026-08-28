@@ -1,7 +1,6 @@
 package com.jhony4lves.echo360.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -27,19 +25,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.jhony4lves.echo360.ui.system.XboxSystemScreen
 
 private enum class EchoDestination(
-    val title: String,
     val shortLabel: String,
 ) {
-    Home("Início", "Home"),
-    Library("Biblioteca", "Jogos"),
-    Transfer("EchoTransfer", "Transfer"),
-    System("Sistema", "Xbox"),
+    Home("Home"),
+    Library("Jogos"),
+    Transfer("Transfer"),
+    System("Xbox"),
 }
 
 @Composable
@@ -72,19 +69,17 @@ fun Echo360App() {
 
                     EchoDestination.Library -> PlaceholderScreen(
                         title = "EchoLibrary",
-                        description = "A biblioteca nativa vai sincronizar jogos, capas, Title ID, Media ID, TU, favoritos e sessões.",
+                        description = "Biblioteca nativa, capas, Title ID, Media ID, TU, favoritos, backlog e sessões entram depois da paridade do EchoTransfer.",
                         modifier = Modifier.padding(innerPadding),
                     )
 
                     EchoDestination.Transfer -> PlaceholderScreen(
                         title = "EchoTransfer",
-                        description = "O próximo módulo da migração: comparação, fila, Fast/Background, failover e verificação pós-upload sem depender do Node.",
+                        description = "A camada de rede nativa está sendo construída agora. Ela será a base do Fast, Background e Auto sem Node/Termux.",
                         modifier = Modifier.padding(innerPadding),
                     )
 
-                    EchoDestination.System -> PlaceholderScreen(
-                        title = "Xbox",
-                        description = "Conexão, temperaturas, armazenamento, Aurora/NOVA, FTP e futuramente EchoCore aparecerão aqui.",
+                    EchoDestination.System -> XboxSystemScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
                 }
@@ -156,9 +151,7 @@ private fun EchoHome(
             }
         }
 
-        item {
-            FeaturePreviewCard()
-        }
+        item { FeaturePreviewCard() }
     }
 }
 
@@ -179,18 +172,18 @@ private fun XboxStatusCard(onOpenSystem: () -> Unit) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Aguardando conexão",
+                text = "Conectividade nativa pronta para configurar",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Quando a camada nativa de rede entrar, o status do console aparecerá aqui automaticamente.",
+                text = "Configure o console uma vez. O Echo360 guarda as credenciais criptografadas e testa NOVA, Aurora FTP e FTPdll diretamente do Android.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(14.dp))
             Button(onClick = onOpenSystem) {
-                Text("Abrir sistema")
+                Text("Configurar Xbox")
             }
         }
     }
@@ -240,12 +233,12 @@ private fun FeaturePreviewCard() {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "EchoHome → EchoTransfer → EchoLibrary",
+                text = "Conectividade nativa → EchoTransfer → EchoLibrary",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "A interface nasce primeiro; os protocolos do Companion serão migrados para serviços Android isolados e testáveis.",
+                text = "A rede sai do servidor Node e vira infraestrutura Android reutilizável pelo launcher inteiro.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -258,24 +251,22 @@ private fun PlaceholderScreen(
     description: String,
     modifier: Modifier = Modifier,
 ) {
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
             .padding(24.dp),
-        contentAlignment = Alignment.Center,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Black,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Black,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
