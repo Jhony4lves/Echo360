@@ -2,6 +2,7 @@ package com.jhony4lves.echo360.ui.system
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -190,27 +191,23 @@ fun XboxSystemScreen(
                         val profile = currentProfile()
                         if (profile == null) {
                             message = "Revise IP e portas antes de testar."
-                            return@Button
-                        }
-
-                        scope.launch {
-                            isTesting = true
-                            message = null
-                            snapshot = runCatching {
-                                store.save(profile)
-                                repository.check(profile)
-                            }.onFailure {
-                                message = "Falha ao testar o Xbox. Confira a rede e tente novamente."
-                            }.getOrNull()
-                            isTesting = false
+                        } else {
+                            scope.launch {
+                                isTesting = true
+                                message = null
+                                snapshot = runCatching {
+                                    store.save(profile)
+                                    repository.check(profile)
+                                }.onFailure {
+                                    message = "Falha ao testar o Xbox. Confira a rede e tente novamente."
+                                }.getOrNull()
+                                isTesting = false
+                            }
                         }
                     },
                 ) {
                     if (isTesting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(2.dp),
-                            strokeWidth = 2.dp,
-                        )
+                        CircularProgressIndicator(strokeWidth = 2.dp)
                     } else {
                         Text("Salvar e testar")
                     }
@@ -245,16 +242,14 @@ fun XboxSystemScreen(
 @Composable
 private fun SectionCard(
     title: String,
-    content: @Composable Column.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(title, fontWeight = FontWeight.Bold)
-            content()
-        }
+            content = content,
+        )
     }
 }
 
@@ -267,9 +262,7 @@ private fun PortField(
 ) {
     OutlinedTextField(
         value = value,
-        onValueChange = { input ->
-            onValueChange(input.filter(Char::isDigit).take(5))
-        },
+        onValueChange = { input -> onValueChange(input.filter(Char::isDigit).take(5)) },
         modifier = modifier,
         label = { Text(label) },
         singleLine = true,
