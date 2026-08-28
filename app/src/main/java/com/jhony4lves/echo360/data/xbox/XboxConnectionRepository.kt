@@ -5,91 +5,177 @@ import com.jhony4lves.echo360.domain.xbox.TransportStatus
 import com.jhony4lves.echo360.domain.xbox.XboxConnectionSnapshot
 import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.domain.xbox.XboxTransport
-import com.jhony4lves.echo360.network.ftp.FtpControlClient
-import com.jhony4lves.echo360.network.ftp.FtpLoginResult
-import com.jhony4lves.echo360.network.ftp.FtpLoginStatus
+import com.jhony4lves.echo360.network.ftp.FtpProtocolException
+import com.jhony4lves.echo360.network.ftp.FtpRoute
+import com.jhony4lves.echo360.network.ftp.XboxFtpSession
+import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
 import com.jhony4lves.echo360.network.nova.AuroraNovaClient
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import java.io.EOFException
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import kotlin.system.measureTimeMillis
 
 class XboxConnectionRepository(
     private val novaClient: AuroraNovaClient = AuroraNovaClient(),
-    private val ftpClient: FtpControlClient = FtpControlClient(),
+    private val ftpSessionFactory: XboxFtpSessionFactory = XboxFtpSessionFactory(),
 ) {
-    suspend fun check(profile: XboxProfile): XboxConnectionSnapshot = coroutineScope {
+    /**
+     * Health checks are deliberately sequential.
+     *
+     * Aurora and FTPdll on real RGH setups can be sensitive to connection churn.
+     * The app therefore validates one transport at a time and uses the exact same
+     * passive/active sessions that EchoTransfer uses instead of a generic login-only probe.
+     */
+    suspend fun check(profile: XboxProfile): XboxConnectionSnapshot {
         val endpoint = profile.endpoint.validated()
-        val credentials = profile.credentials
 
-        val nova = async {
-            val result = novaClient.probe(endpoint)
-            TransportHealth(
-                transport = XboxTransport.Nova,
-                status = if (result.reachable) TransportStatus.Connected else TransportStatus.Unreachable,
-                detail = if (result.reachable) {
-                    "NOVA respondeu na rede. Autenticação profunda ainda não foi executada."
-                } else {
-                    result.detail
-                },
-                latencyMs = result.latencyMs,
-            )
-        }
+        val novaResult = novaClient.probe(endpoint)
+        val nova = TransportHealth(
+            transport = XboxTransport.Nova,
+            status = if (novaResult.reachable) TransportStatus.Connected else TransportStatus.Unreachable,
+            detail = if (novaResult.reachable) {
+                "NOVA respondeu na rede. Autenticação profunda ainda não foi executada."
+            } else {
+                novaResult.detail
+            },
+            latencyMs = novaResult.latencyMs,
+        )
 
-        val auroraFtp = async {
-            ftpHealth(
-                transport = XboxTransport.AuroraFtp,
-                host = endpoint.host,
-                port = endpoint.auroraFtpPort,
-                username = credentials.auroraFtpUsername,
-                password = credentials.auroraFtpPassword,
-            )
-        }
+        val auroraFtp = ftpHealth(
+            profile = profile,
+            transport = XboxTransport.AuroraFtp,
+            route = FtpRoute.Fast,
+            port = endpoint.auroraFtpPort,
+        )
 
-        val ftpDll = async {
-            ftpHealth(
-                transport = XboxTransport.FtpDll,
-                host = endpoint.host,
-                port = endpoint.ftpDllPort,
-                username = credentials.ftpDllUsername,
-                password = credentials.ftpDllPassword,
-            )
-        }
+        val ftpDll = ftpHealth(
+            profile = profile,
+            transport = XboxTransport.FtpDll,
+            route = FtpRoute.Background,
+            port = endpoint.ftpDllPort,
+        )
 
-        XboxConnectionSnapshot(
-            nova = nova.await(),
-            auroraFtp = auroraFtp.await(),
-            ftpDll = ftpDll.await(),
+        return XboxConnectionSnapshot(
+            nova = nova,
+            auroraFtp = auroraFtp,
+            ftpDll = ftpDll,
             checkedAtEpochMs = System.currentTimeMillis(),
         )
     }
 
     private suspend fun ftpHealth(
+        profile: XboxProfile,
         transport: XboxTransport,
-        host: String,
+        route: FtpRoute,
         port: Int,
-        username: String,
-        password: String,
     ): TransportHealth {
-        val result = ftpClient.loginAndQuit(
-            host = host,
-            port = port,
-            username = username,
-            password = password,
-        )
+        val credentials = profile.credentials
+        val configured = when (transport) {
+            XboxTransport.AuroraFtp ->
+                credentials.auroraFtpUsername.isNotBlank() && credentials.auroraFtpPassword.isNotBlank()
+
+            XboxTransport.FtpDll ->
+                credentials.ftpDllUsername.isNotBlank() && credentials.ftpDllPassword.isNotBlank()
+
+            XboxTransport.Nova -> true
+        }
+
+        if (!configured) {
+            return TransportHealth(
+                transport = transport,
+                status = TransportStatus.NotConfigured,
+                detail = "Credenciais não configuradas.",
+            )
+        }
+
+        var session: XboxFtpSession? = null
+        val startedAt = System.currentTimeMillis()
+        return try {
+            var rootEntries = 0
+            val elapsed = measureTimeMillis {
+                val routed = ftpSessionFactory.connect(profile, route)
+                session = routed.session
+                rootEntries = routed.session.list("/").size
+            }
+
+            TransportHealth(
+                transport = transport,
+                status = TransportStatus.Connected,
+                detail = when (transport) {
+                    XboxTransport.AuroraFtp ->
+                        "Fast validado: login + sessão passiva + LIST da raiz ($rootEntries entradas)."
+
+                    XboxTransport.FtpDll ->
+                        "Background validado: login + FTP ativo + LIST da raiz ($rootEntries entradas)."
+
+                    XboxTransport.Nova -> "Conectado."
+                },
+                latencyMs = elapsed,
+            )
+        } catch (error: Throwable) {
+            ftpFailure(
+                transport = transport,
+                port = port,
+                error = error,
+                elapsedMs = System.currentTimeMillis() - startedAt,
+            )
+        } finally {
+            runCatching { session?.close() }
+        }
+    }
+
+    private fun ftpFailure(
+        transport: XboxTransport,
+        port: Int,
+        error: Throwable,
+        elapsedMs: Long,
+    ): TransportHealth {
+        val protocol = error as? FtpProtocolException
+        val ftpCode = protocol?.ftpCode
+        val status = when {
+            ftpCode == 421 -> TransportStatus.Busy
+            ftpCode == 530 -> TransportStatus.AuthFailed
+            (ftpCode ?: 0) in 500..599 &&
+                protocol?.message.orEmpty().contains("login", ignoreCase = true) -> TransportStatus.AuthFailed
+            error is ConnectException -> TransportStatus.Unreachable
+            error is SocketTimeoutException -> TransportStatus.Unreachable
+            error is EOFException -> TransportStatus.ProtocolError
+            error is IOException -> TransportStatus.Unreachable
+            else -> TransportStatus.ProtocolError
+        }
+
+        val detail = when {
+            ftpCode == 421 ->
+                "FTP $port respondeu 421: limite de conexões atingido. Feche outras sessões e teste novamente."
+
+            status == TransportStatus.AuthFailed ->
+                "FTP $port recusou usuário/senha${ftpCode?.let { " (código $it)" }.orEmpty()}."
+
+            error is ConnectException ->
+                "Conexão recusada na porta $port. O serviço FTP parece não estar escutando nessa porta."
+
+            error is SocketTimeoutException ->
+                "Timeout na porta $port após ${elapsedMs} ms. O serviço não concluiu a etapa FTP esperada."
+
+            error is EOFException ->
+                "A porta $port aceitou a conexão, mas o servidor FTP fechou o canal sem concluir a resposta."
+
+            protocol != null ->
+                "FTP $port respondeu ${ftpCode ?: "sem código"}: ${protocol.message ?: "erro de protocolo"}"
+
+            error is IOException ->
+                "Falha de rede na porta $port: ${error.message ?: error.javaClass.simpleName}."
+
+            else ->
+                "Falha FTP na porta $port: ${error.message ?: error.javaClass.simpleName}."
+        }
 
         return TransportHealth(
             transport = transport,
-            status = result.status.toTransportStatus(),
-            detail = result.detail,
-            latencyMs = result.latencyMs,
+            status = status,
+            detail = detail,
+            latencyMs = elapsedMs,
         )
-    }
-
-    private fun FtpLoginStatus.toTransportStatus(): TransportStatus = when (this) {
-        FtpLoginStatus.Connected -> TransportStatus.Connected
-        FtpLoginStatus.NotConfigured -> TransportStatus.NotConfigured
-        FtpLoginStatus.AuthFailed -> TransportStatus.AuthFailed
-        FtpLoginStatus.Busy -> TransportStatus.Busy
-        FtpLoginStatus.Unreachable -> TransportStatus.Unreachable
-        FtpLoginStatus.ProtocolError -> TransportStatus.ProtocolError
     }
 }
