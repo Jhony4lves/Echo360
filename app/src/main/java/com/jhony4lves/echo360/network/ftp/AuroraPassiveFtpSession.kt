@@ -10,6 +10,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 
 class AuroraPassiveFtpSession private constructor(
     private val channel: FtpCommandChannel,
@@ -26,9 +27,13 @@ class AuroraPassiveFtpSession private constructor(
             openPassiveSocket().use { dataSocket ->
                 channel.send("LIST")
                 expectPreliminary(channel.read(), "Aurora não iniciou LIST.")
-                val lines = dataSocket.getInputStream()
-                    .bufferedReader(Charsets.UTF_8)
-                    .readLines()
+                val lines = try {
+                    dataSocket.getInputStream()
+                        .bufferedReader(Charsets.UTF_8)
+                        .readLines()
+                } catch (error: SocketTimeoutException) {
+                    throw FtpStageTimeoutException("recebendo dados do LIST passivo", error)
+                }
                 expectPositive(channel.read(), "Aurora não concluiu LIST.")
                 UnixFtpListParser.parse(lines, canonical)
             }
@@ -126,21 +131,8 @@ class AuroraPassiveFtpSession private constructor(
     }
 
     private fun openPassiveSocket(): Socket {
-        val epsv = channel.command("EPSV")
-        val endpoint = if (epsv.code == 229) {
-            val port = Regex("\\(\\|\\|\\|(\\d+)\\|\\)")
-                .find(epsv.text)
-                ?.groupValues
-                ?.get(1)
-                ?.toIntOrNull()
-                ?: throw FtpProtocolException(229, "Resposta EPSV inválida.")
-            InetSocketAddress(channel.remoteAddress, port)
-        } else {
-            val pasv = channel.command("PASV")
-            if (pasv.code != 227) {
-                throw FtpProtocolException(pasv.code, "Aurora não ofereceu modo passivo.")
-            }
-
+        val pasv = channel.command("PASV")
+        val endpoint = if (pasv.code == 227) {
             val values = Regex("\\((\\d+),(\\d+),(\\d+),(\\d+),(\\d+),(\\d+)\\)")
                 .find(pasv.text)
                 ?.groupValues
@@ -156,11 +148,30 @@ class AuroraPassiveFtpSession private constructor(
             }
             val port = values[4] * 256 + values[5]
             InetSocketAddress(host, port)
+        } else {
+            val epsv = channel.command("EPSV")
+            if (epsv.code != 229) {
+                throw FtpProtocolException(epsv.code, "Aurora não ofereceu modo passivo (PASV/EPSV).")
+            }
+            val port = Regex("\\(\\|\\|\\|(\\d+)\\|\\)")
+                .find(epsv.text)
+                ?.groupValues
+                ?.get(1)
+                ?.toIntOrNull()
+                ?: throw FtpProtocolException(229, "Resposta EPSV inválida.")
+            InetSocketAddress(channel.remoteAddress, port)
         }
 
         return Socket().apply {
             soTimeout = timeoutMs
-            connect(endpoint, timeoutMs)
+            try {
+                connect(endpoint, timeoutMs)
+            } catch (error: SocketTimeoutException) {
+                throw FtpStageTimeoutException(
+                    "abrindo conexão de dados passiva ${endpoint.address?.hostAddress ?: endpoint.hostString}:${endpoint.port}",
+                    error,
+                )
+            }
         }
     }
 
