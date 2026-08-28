@@ -32,7 +32,13 @@ class FtpDllActiveFtpSession private constructor(
                         .bufferedReader(Charsets.UTF_8)
                         .readLines()
                     requirePositive(channel.read(), "FTPdll não concluiu LIST.")
-                    UnixFtpListParser.parse(lines, canonical)
+
+                    val parsed = UnixFtpListParser.parse(lines, canonical)
+                    if (canonical == "/") {
+                        parsed.map(::canonicalizeRootEntry)
+                    } else {
+                        parsed
+                    }
                 }
             }
         }
@@ -158,6 +164,17 @@ class FtpDllActiveFtpSession private constructor(
             FtpDllActiveFtpSession(channel, timeoutMs)
         }
     }
+}
+
+private fun canonicalizeRootEntry(entry: RemoteEntry): RemoteEntry {
+    val canonicalPath = runCatching {
+        XboxPath.fromFtpDllPath("/${entry.name}")
+    }.getOrNull() ?: return entry
+
+    return entry.copy(
+        name = canonicalPath.substringAfterLast('/'),
+        canonicalPath = canonicalPath,
+    )
 }
 
 private fun requirePositive(reply: FtpReply, message: String) {
