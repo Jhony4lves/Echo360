@@ -113,15 +113,19 @@ class FtpDllActiveFtpSession private constructor(
     }
 
     private fun prepareActiveListener(): ServerSocket {
-        val addressBytes = channel.localAddress.address
+        val localAddress = channel.localAddress
+        val addressBytes = localAddress.address
         if (addressBytes.size != 4) {
             throw FtpProtocolException(null, "FTP ativo exige IPv4 na rede local.")
         }
 
+        val localHost = localAddress.hostAddress
+            ?: throw FtpProtocolException(null, "Não foi possível determinar o IPv4 local.")
+
         val listener = ServerSocket().apply {
             reuseAddress = true
             soTimeout = timeoutMs
-            bind(InetSocketAddress(channel.localAddress, 0), 1)
+            bind(InetSocketAddress(localHost, 0), 1)
         }
 
         val octets = addressBytes.map { it.toInt() and 0xff }
