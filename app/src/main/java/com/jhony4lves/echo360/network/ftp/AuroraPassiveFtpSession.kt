@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 
@@ -69,11 +70,30 @@ class AuroraPassiveFtpSession private constructor(
                     expectPreliminary(channel.read(), "Aurora não iniciou STOR.")
 
                     dataSocket.getOutputStream().use { output ->
-                        copyWithProgress(input, output, onProgress)
+                        copyStreamWithProgress(input, output, onProgress)
                     }
 
                     expectPositive(channel.read(), "Aurora não concluiu STOR.")
                 }
+            }
+        }
+    }
+
+    override suspend fun download(
+        canonicalPath: String,
+        destination: OutputStream,
+        onProgress: (Long) -> Unit,
+    ) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val remote = XboxPath.toAuroraFtpPath(XboxPath.canonical(canonicalPath))
+            openPassiveSocket().use { dataSocket ->
+                channel.send("RETR $remote")
+                expectPreliminary(channel.read(), "Aurora não iniciou RETR.")
+                dataSocket.getInputStream().use { input ->
+                    copyStreamWithProgress(input, destination, onProgress)
+                }
+                destination.flush()
+                expectPositive(channel.read(), "Aurora não concluiu RETR.")
             }
         }
     }
@@ -169,9 +189,9 @@ private fun expectPreliminary(reply: FtpReply, message: String) {
     if (!reply.isPreliminary) throw FtpProtocolException(reply.code, message)
 }
 
-private fun copyWithProgress(
+private fun copyStreamWithProgress(
     input: InputStream,
-    output: java.io.OutputStream,
+    output: OutputStream,
     onProgress: (Long) -> Unit,
 ) {
     val buffer = ByteArray(256 * 1024)
