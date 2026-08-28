@@ -7,6 +7,7 @@ import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.domain.xbox.XboxTransport
 import com.jhony4lves.echo360.network.ftp.FtpProtocolException
 import com.jhony4lves.echo360.network.ftp.FtpRoute
+import com.jhony4lves.echo360.network.ftp.FtpStageTimeoutException
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
 import com.jhony4lves.echo360.network.nova.AuroraNovaClient
@@ -20,13 +21,6 @@ class XboxConnectionRepository(
     private val novaClient: AuroraNovaClient = AuroraNovaClient(),
     private val ftpSessionFactory: XboxFtpSessionFactory = XboxFtpSessionFactory(),
 ) {
-    /**
-     * Health checks are deliberately sequential.
-     *
-     * Aurora and FTPdll on real RGH setups can be sensitive to connection churn.
-     * The app therefore validates one transport at a time and uses the exact same
-     * passive/active sessions that EchoTransfer uses instead of a generic login-only probe.
-     */
     suspend fun check(profile: XboxProfile): XboxConnectionSnapshot {
         val endpoint = profile.endpoint.validated()
 
@@ -104,10 +98,10 @@ class XboxConnectionRepository(
                 status = TransportStatus.Connected,
                 detail = when (transport) {
                     XboxTransport.AuroraFtp ->
-                        "Fast validado: login + sessão passiva + LIST da raiz ($rootEntries entradas)."
+                        "Fast validado: login + PASV + LIST da raiz ($rootEntries entradas)."
 
                     XboxTransport.FtpDll ->
-                        "Background validado: login + FTP ativo + LIST da raiz ($rootEntries entradas)."
+                        "Background validado: login + PORT + LIST da raiz ($rootEntries entradas)."
 
                     XboxTransport.Nova -> "Conectado."
                 },
@@ -132,6 +126,7 @@ class XboxConnectionRepository(
         elapsedMs: Long,
     ): TransportHealth {
         val protocol = error as? FtpProtocolException
+        val stagedTimeout = error as? FtpStageTimeoutException
         val ftpCode = protocol?.ftpCode
         val status = when {
             ftpCode == 421 -> TransportStatus.Busy
@@ -139,6 +134,7 @@ class XboxConnectionRepository(
             (ftpCode ?: 0) in 500..599 &&
                 protocol?.message.orEmpty().contains("login", ignoreCase = true) -> TransportStatus.AuthFailed
             error is ConnectException -> TransportStatus.Unreachable
+            stagedTimeout != null -> TransportStatus.Unreachable
             error is SocketTimeoutException -> TransportStatus.Unreachable
             error is EOFException -> TransportStatus.ProtocolError
             error is IOException -> TransportStatus.Unreachable
@@ -152,11 +148,14 @@ class XboxConnectionRepository(
             status == TransportStatus.AuthFailed ->
                 "FTP $port recusou usuário/senha${ftpCode?.let { " (código $it)" }.orEmpty()}."
 
+            stagedTimeout != null ->
+                "Timeout na porta $port em: ${stagedTimeout.stage}. • ${elapsedMs} ms"
+
             error is ConnectException ->
                 "Conexão recusada na porta $port. O serviço FTP parece não estar escutando nessa porta."
 
             error is SocketTimeoutException ->
-                "Timeout na porta $port após ${elapsedMs} ms. O serviço não concluiu a etapa FTP esperada."
+                "Timeout na porta $port após ${elapsedMs} ms."
 
             error is EOFException ->
                 "A porta $port aceitou a conexão, mas o servidor FTP fechou o canal sem concluir a resposta."
