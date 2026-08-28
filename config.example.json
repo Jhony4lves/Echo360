@@ -1,0 +1,22 @@
+{
+  "xbox": {
+    "host": "192.168.1.18",
+    "nova": {
+      "port": 9999,
+      "username": "CHANGE_ME",
+      "password": "CHANGE_ME"
+    },
+    "ftpFast": {
+      "label": "Aurora FTP",
+      "port": 21,
+      "username": "CHANGE_ME",
+      "password": "CHANGE_ME"
+    },
+    "ftpBackground": {
+      "label": "FTPdll",
+      "port": 7564,
+      "username": "CHANGE_ME",
+      "password": "CHANGE_ME"
+    }
+  }
+}
