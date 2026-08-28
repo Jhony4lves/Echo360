@@ -13,6 +13,7 @@ data class GameEntry(
 ) {
     val titleIdHex: String get() = titleId.toUInt().toString(16).uppercase().padStart(8, '0')
     val mediaIdHex: String get() = mediaId.toUInt().toString(16).uppercase().padStart(8, '0')
+    val stableKey: String get() = "$titleIdHex:$mediaIdHex:$discNumber"
 
     val canonicalDirectory: String?
         get() {

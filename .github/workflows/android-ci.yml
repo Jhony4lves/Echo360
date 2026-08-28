@@ -7,6 +7,7 @@ on:
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-ci.yml"
+      - ".github/echo360-debug-keystore.b64"
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-ci.yml"
+      - ".github/echo360-debug-keystore.b64"
 
 jobs:
   build:
@@ -29,6 +31,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Set up stable debug signing
+        run: |
+          mkdir -p "$HOME/.android"
+          base64 --decode .github/echo360-debug-keystore.b64 > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
