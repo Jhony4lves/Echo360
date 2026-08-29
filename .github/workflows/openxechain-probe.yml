@@ -37,12 +37,16 @@ jobs:
             zlib1g-dev
 
       - name: Clone pinned OpenXeChain buildscript
+        env:
+          OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
         run: |
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git clone https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
+          git clone --no-checkout --filter=blob:none https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
           cd /tmp/openxechain
+          git checkout "$OPENXECHAIN_BUILD_SHA"
           git submodule sync --recursive
-          git submodule update --init --recursive
+          git submodule update --init --recursive --depth 1
+          test "$(git rev-parse HEAD)" = "$OPENXECHAIN_BUILD_SHA"
           git rev-parse HEAD
           git submodule status --recursive
 
@@ -68,6 +72,7 @@ jobs:
           mkdir -p /tmp/echocore-probe
           {
             echo "OpenXeChain build: success"
+            echo "Buildscript: eed1fa65bf9577fd31625764b320a90182ea9ade"
             echo "UTC: $(date -u +%FT%TZ)"
             echo "clang: $(/tmp/openxechain-sysroot/bin/clang --version | head -1)"
           } > /tmp/echocore-probe/result.txt
