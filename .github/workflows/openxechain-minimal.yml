@@ -1,0 +1,182 @@
+name: OpenXeChain Minimal
+
+on:
+  push:
+    branches:
+      - "experiment/openxechain-minimal"
+    paths:
+      - ".github/workflows/openxechain-minimal.yml"
+      - "echocore/openxechain/echo_core_freestanding.c"
+
+jobs:
+  llvm-minimal:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build python3 python3-pip zlib1g-dev
+          python3 -m pip install --user "cmake==3.31.10"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "Runner CPUs: $(nproc)"
+
+      - name: Restore minimal LLVM cache
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/echo-openxechain-llvm
+          key: echo-openxechain-minimal-v1-${{ runner.os }}-890b83f6c8259a8899e182a5f7d9cf39c64131cc
+
+      - name: Clone only required OpenXeChain sources
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        env:
+          OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git clone --no-checkout --filter=blob:none https://github.com/OpenXeChain/buildscript.git /tmp/openxechain-min
+          cd /tmp/openxechain-min
+          git checkout "$OPENXECHAIN_BUILD_SHA"
+          git submodule sync --recursive
+          git submodule update --init --depth 1 llvm
+          test "$(git -C llvm rev-parse HEAD)" = "890b83f6c8259a8899e182a5f7d9cf39c64131cc"
+
+      - name: Configure minimal Xbox LLVM
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          cmake \
+            -S /tmp/openxechain-min/llvm/llvm \
+            -B /tmp/echo-openxechain-llvm \
+            -G Ninja \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS="lld;clang" \
+            -DLLVM_TARGETS_TO_BUILD=PowerPC \
+            -DLLVM_DEFAULT_TARGET_TRIPLE=ppc32-xbox360 \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_ZLIB=ON
+
+      - name: Build only required Xbox LLVM tools
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          cmake --build /tmp/echo-openxechain-llvm \
+            --target clang lld llvm-dlltool \
+            --parallel "$(nproc)"
+
+      - name: Verify minimal compiler set
+        run: |
+          test -x /tmp/echo-openxechain-llvm/bin/clang
+          test -x /tmp/echo-openxechain-llvm/bin/lld-link
+          test -x /tmp/echo-openxechain-llvm/bin/llvm-dlltool
+          /tmp/echo-openxechain-llvm/bin/clang --version
+          /tmp/echo-openxechain-llvm/bin/llvm-dlltool --version || true
+
+  echocore-freestanding:
+    needs: llvm-minimal
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Install lightweight host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build python3 python3-pip
+          python3 -m pip install --user "cmake==3.31.10"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Restore proven minimal LLVM
+        id: llvm-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/echo-openxechain-llvm
+          key: echo-openxechain-minimal-v1-${{ runner.os }}-890b83f6c8259a8899e182a5f7d9cf39c64131cc
+
+      - name: Require minimal LLVM cache
+        run: |
+          test "${{ steps.llvm-cache.outputs.cache-hit }}" = "true"
+          test -x /tmp/echo-openxechain-llvm/bin/clang
+          test -x /tmp/echo-openxechain-llvm/bin/lld-link
+          test -x /tmp/echo-openxechain-llvm/bin/llvm-dlltool
+
+      - name: Fetch pinned XAM stubs and SynthXEX
+        env:
+          OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git clone --no-checkout --filter=blob:none https://github.com/OpenXeChain/buildscript.git /tmp/openxechain-min
+          cd /tmp/openxechain-min
+          git checkout "$OPENXECHAIN_BUILD_SHA"
+          git submodule sync --recursive
+          git submodule update --init --depth 1 xecorelib synthxex
+          test "$(git -C xecorelib rev-parse HEAD)" = "c65d67e071357acade681f04c46ae9719797f239"
+          test "$(git -C synthxex rev-parse HEAD)" = "48d1453a55468aa2f8a211db0b20edd594ef5be3"
+
+      - name: Build host SynthXEX
+        run: |
+          cmake \
+            -S /tmp/openxechain-min/synthxex \
+            -B /tmp/synthxex-host \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang
+          cmake --build /tmp/synthxex-host --target synthxex --parallel "$(nproc)"
+          test -x /tmp/synthxex-host/synthxex
+
+      - name: Generate XAM import stub
+        run: |
+          mkdir -p /tmp/echocore-minimal
+          /tmp/echo-openxechain-llvm/bin/llvm-dlltool \
+            -m xbox360 \
+            -d /tmp/openxechain-min/xecorelib/xam/xam.def \
+            -l /tmp/echocore-minimal/xam.a
+          test -s /tmp/echocore-minimal/xam.a
+
+      - name: Compile freestanding EchoCore PE
+        run: |
+          /tmp/echo-openxechain-llvm/bin/clang \
+            --target=ppc32-xbox360 \
+            -nostdlib \
+            -ffreestanding \
+            -fno-builtin \
+            -fdeclspec \
+            -mlongcall \
+            -Os \
+            -Wall \
+            -Wextra \
+            -Werror \
+            echocore/openxechain/echo_core_freestanding.c \
+            /tmp/echocore-minimal/xam.a \
+            -o /tmp/echocore-minimal/EchoCore.pe
+          test -s /tmp/echocore-minimal/EchoCore.pe
+
+      - name: Convert PE to XEX2
+        run: |
+          /tmp/synthxex-host/synthxex \
+            --input /tmp/echocore-minimal/EchoCore.pe \
+            --output /tmp/echocore-minimal/EchoCore.xex \
+            --type title
+          python3 - <<'PY'
+          from pathlib import Path
+          pe = Path('/tmp/echocore-minimal/EchoCore.pe')
+          xex = Path('/tmp/echocore-minimal/EchoCore.xex')
+          assert pe.read_bytes()[:2] == b'MZ', pe.read_bytes()[:2]
+          assert xex.read_bytes()[:4] == b'XEX2', xex.read_bytes()[:4]
+          print(f'PE={pe.stat().st_size} bytes')
+          print(f'XEX={xex.stat().st_size} bytes')
+          PY
+
+      - name: Upload freestanding EchoCore XEX
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocore-freestanding-${{ github.sha }}
+          path: /tmp/echocore-minimal/EchoCore.xex
+          if-no-files-found: error
+          retention-days: 14
