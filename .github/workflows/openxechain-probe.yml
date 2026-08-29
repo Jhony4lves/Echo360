@@ -1,0 +1,78 @@
+name: OpenXeChain Probe
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/openxechain-probe.yml"
+      - "echocore/openxechain/**"
+
+jobs:
+  toolchain:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Install OpenXeChain host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            binutils \
+            cmake \
+            ninja-build \
+            make \
+            python3 \
+            python3-yaml \
+            bzip2 \
+            gzip \
+            findutils \
+            sed \
+            tar \
+            unzip \
+            zip \
+            gawk \
+            zlib1g-dev
+
+      - name: Clone pinned OpenXeChain buildscript
+        run: |
+          git clone --recursive https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
+          cd /tmp/openxechain
+          git rev-parse HEAD
+          git submodule status --recursive
+
+      - name: Build OpenXeChain
+        env:
+          PREFIX: /tmp/openxechain-sysroot
+          PARALLEL: "2"
+          BUILD_TYPE: Release
+        run: |
+          cd /tmp/openxechain
+          ./build-toolchain.sh
+
+      - name: Verify installed toolchain
+        run: |
+          test -x /tmp/openxechain-sysroot/bin/clang
+          test -x /tmp/openxechain-sysroot/bin/clang++
+          test -x /tmp/openxechain-sysroot/bin/synthxex
+          /tmp/openxechain-sysroot/bin/clang --version
+          /tmp/openxechain-sysroot/bin/synthxex --help || true
+
+      - name: Record probe result
+        run: |
+          mkdir -p /tmp/echocore-probe
+          {
+            echo "OpenXeChain build: success"
+            echo "UTC: $(date -u +%FT%TZ)"
+            echo "clang: $(/tmp/openxechain-sysroot/bin/clang --version | head -1)"
+          } > /tmp/echocore-probe/result.txt
+
+      - name: Upload probe record
+        uses: actions/upload-artifact@v4
+        with:
+          name: openxechain-probe-${{ github.sha }}
+          path: /tmp/echocore-probe/result.txt
+          if-no-files-found: error
+          retention-days: 14
