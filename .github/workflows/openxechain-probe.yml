@@ -38,8 +38,11 @@ jobs:
 
       - name: Clone pinned OpenXeChain buildscript
         run: |
-          git clone --recursive https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git clone https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
           cd /tmp/openxechain
+          git submodule sync --recursive
+          git submodule update --init --recursive
           git rev-parse HEAD
           git submodule status --recursive
 
