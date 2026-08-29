@@ -21,10 +21,10 @@ jobs:
           sudo apt-get install -y \
             clang \
             binutils \
-            cmake \
             ninja-build \
             make \
             python3 \
+            python3-pip \
             python3-yaml \
             bzip2 \
             gzip \
@@ -35,6 +35,9 @@ jobs:
             zip \
             gawk \
             zlib1g-dev
+          python3 -m pip install --user "cmake==3.31.8"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/cmake" --version
 
       - name: Clone pinned OpenXeChain buildscript
         env:
@@ -56,6 +59,7 @@ jobs:
           PARALLEL: "2"
           BUILD_TYPE: Release
         run: |
+          cmake --version
           cd /tmp/openxechain
           ./build-toolchain.sh
 
@@ -75,6 +79,7 @@ jobs:
             echo "Buildscript: eed1fa65bf9577fd31625764b320a90182ea9ade"
             echo "UTC: $(date -u +%FT%TZ)"
             echo "clang: $(/tmp/openxechain-sysroot/bin/clang --version | head -1)"
+            echo "cmake: $(cmake --version | head -1)"
           } > /tmp/echocore-probe/result.txt
 
       - name: Upload probe record
