@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "app/**"
+      - "echocore/**"
+      - "tools/**"
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-ci.yml"
@@ -12,6 +14,8 @@ on:
     branches: [main]
     paths:
       - "app/**"
+      - "echocore/**"
+      - "tools/**"
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-ci.yml"
@@ -42,6 +46,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+
+      - name: Build EchoLink C reference server
+        run: gcc -std=c11 -Wall -Wextra -Werror -O2 echocore/reference/host_ping_server.c -o /tmp/echolink-host-server
+
+      - name: Probe EchoLink C reference server
+        run: |
+          /tmp/echolink-host-server 36000 >/tmp/echolink-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          sleep 0.2
+          python3 tools/echolink_ping.py 127.0.0.1 36000
+          wait $SERVER_PID
 
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
