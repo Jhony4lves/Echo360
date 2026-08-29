@@ -9,7 +9,7 @@ on:
 jobs:
   toolchain:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout Echo360
@@ -38,8 +38,17 @@ jobs:
           python3 -m pip install --user "cmake==3.31.10"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cmake" --version
+          echo "Runner CPUs: $(nproc)"
+
+      - name: Restore OpenXeChain toolchain cache
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: openxechain-v1-${{ runner.os }}-eed1fa65bf9577fd31625764b320a90182ea9ade-cmake-3.31.10
 
       - name: Clone pinned OpenXeChain buildscript
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         env:
           OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
         run: |
@@ -54,9 +63,9 @@ jobs:
           git submodule status --recursive
 
       - name: Build OpenXeChain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         env:
           PREFIX: /tmp/openxechain-sysroot
-          PARALLEL: "2"
           BUILD_TYPE: Release
         run: |
           cmake --version
@@ -77,6 +86,8 @@ jobs:
           {
             echo "OpenXeChain build: success"
             echo "Buildscript: eed1fa65bf9577fd31625764b320a90182ea9ade"
+            echo "Cache hit: ${{ steps.toolchain-cache.outputs.cache-hit }}"
+            echo "Runner CPUs: $(nproc)"
             echo "UTC: $(date -u +%FT%TZ)"
             echo "clang: $(/tmp/openxechain-sysroot/bin/clang --version | head -1)"
             echo "cmake: $(cmake --version | head -1)"
@@ -87,5 +98,41 @@ jobs:
         with:
           name: openxechain-probe-${{ github.sha }}
           path: /tmp/echocore-probe/result.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  echocore:
+    needs: toolchain
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Restore proven OpenXeChain toolchain
+        id: toolchain-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: openxechain-v1-${{ runner.os }}-eed1fa65bf9577fd31625764b320a90182ea9ade-cmake-3.31.10
+
+      - name: Require toolchain cache
+        run: |
+          test "${{ steps.toolchain-cache.outputs.cache-hit }}" = "true"
+          test -x /tmp/openxechain-sysroot/bin/clang
+          test -x /tmp/openxechain-sysroot/bin/synthxex
+
+      - name: Build EchoCore XEX
+        env:
+          OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
+        run: |
+          bash echocore/openxechain/build-echo-core.sh
+
+      - name: Upload EchoCore hardware bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocore-bootstrap-${{ github.sha }}
+          path: /tmp/echocore-build/EchoCore.xex
           if-no-files-found: error
           retention-days: 14
