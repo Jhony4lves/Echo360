@@ -1,0 +1,687 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#06130a">
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Echo360</title>
+<style>
+:root{
+  --bg:#041008;--bg2:#07160c;--panel:#0b1d10;--panel2:#0e2615;
+  --line:#183a22;--line2:#23562f;--text:#f4f8f4;--muted:#8fa294;
+  --green:#49db70;--green2:#20ae4b;--warn:#ffca56;--bad:#ff6a73;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:radial-gradient(circle at 55% -5%,#153d20 0,transparent 33%),linear-gradient(180deg,var(--bg2),var(--bg));color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.app{max-width:760px;margin:auto;padding:24px 20px 70px}
+.eyebrow{font-size:11px;letter-spacing:.18em;color:#99aa9d;font-weight:800;margin:5px 4px 7px}
+.top{display:flex;align-items:center;justify-content:space-between}
+h1{font-size:42px;line-height:1;margin:0 0 22px;font-weight:900;letter-spacing:-.04em}
+.refresh{width:58px;height:58px;border-radius:18px;border:1px solid var(--line);background:#07140b;color:#eaf6ec;font-size:25px;cursor:pointer}
+.card{background:linear-gradient(155deg,#0d2213,#09180e);border:1px solid var(--line);border-radius:26px;padding:22px;box-shadow:0 20px 55px #0004}
+.hero{margin-bottom:26px}
+.statusline{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.status-main{font-size:23px;font-weight:850}
+.dot{display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--bad);margin-right:10px}
+.dot.on{background:var(--green);box-shadow:0 0 15px #49db7080}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.hero-services{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
+.service{background:#07170c;border-radius:18px;padding:15px;border:1px solid #102d19}
+.service b{font-size:20px;display:block}
+.section-head{display:flex;align-items:flex-end;justify-content:space-between;margin:26px 4px 13px}
+.section-head b{font-size:20px}.section-head span{color:var(--muted);font-size:12px}
+.temps{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.metric{min-height:132px}
+.kicker{font-size:11px;letter-spacing:.14em;color:#91a398;font-weight:900}
+.value{font-size:33px;font-weight:900;margin:8px 0 14px;letter-spacing:-.03em}
+.bar{height:8px;background:#16261b;border-radius:99px;overflow:hidden}.bar>div{height:100%;background:var(--green);border-radius:99px}
+.memory{margin-top:13px}
+.memory-row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.memory-pct{font-size:31px;color:var(--green);font-weight:900}
+.now{margin-top:13px}
+.game-row{display:flex;gap:15px;align-items:center;margin-top:14px}
+.game-icon{width:58px;height:58px;border-radius:16px;background:linear-gradient(145deg,#25c653,#15913b);display:grid;place-items:center;font-size:29px;font-weight:900}
+.game-title{font-size:20px;font-weight:850}
+.path{margin-top:12px;color:#728677;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.center-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.center-btn{border:1px solid var(--line);background:linear-gradient(150deg,#0d2113,#08170c);color:inherit;border-radius:24px;padding:19px;text-align:left;min-height:125px;cursor:pointer}
+.center-btn.active{border-color:#347e47;background:linear-gradient(150deg,#12351d,#0a1c10)}
+.center-btn .icon{font-size:22px;width:42px;height:42px;border-radius:13px;background:#0c2c16;display:grid;place-items:center;color:var(--green);margin-bottom:11px}
+.center-btn b{font-size:16px}.center-btn p{font-size:12px;color:#7e9284;margin:4px 0 0;line-height:1.35}
+.panel{display:none;margin-top:16px}.panel.show{display:block}
+.transfer-controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+label{display:block;font-size:11px;color:#98aa9d;font-weight:750;margin:13px 0 5px}
+input,select{width:100%;background:#06110a;border:1px solid var(--line);border-radius:13px;padding:12px;color:var(--text);font:inherit}
+.btnrow{display:flex;gap:9px;flex-wrap:wrap;margin-top:14px}
+.btn{border:1px solid var(--line2);border-radius:13px;padding:11px 14px;background:#0c2815;color:var(--text);font-weight:800;cursor:pointer}
+.btn.primary{background:var(--green);border-color:var(--green);color:#04200b}
+.btn.warn{border-color:#755e26;color:#ffd878}.btn.bad{border-color:#6e2c34;color:#ff8b92}
+.btn[disabled]{opacity:.35;cursor:not-allowed}
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:16px}
+.sum{background:#06150b;border:1px solid #12321b;border-radius:15px;padding:11px}
+.sum b{font-size:19px;display:block}.sum span{font-size:10px;color:var(--muted)}
+.progress-card{margin-top:13px;padding:15px;background:#06140a;border:1px solid #14341d;border-radius:18px}
+.progress-top{display:flex;justify-content:space-between;gap:10px}.progress-name{font-weight:800;max-width:75%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bigbar{height:12px;background:#15261a;border-radius:99px;overflow:hidden;margin:12px 0 8px}.bigbar>div{height:100%;width:0;background:linear-gradient(90deg,#20ae4b,#5bed7c);transition:width .2s}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.stat{font-size:11px;color:var(--muted)}.stat b{display:block;color:var(--text);font-size:15px;margin-top:2px}
+.result{background:#051008;border:1px solid #12321b;border-radius:16px;padding:13px;margin-top:12px;white-space:pre-wrap;max-height:290px;overflow:auto;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}
+.mode-note{font-size:11px;color:#91a398;margin-top:8px;line-height:1.45}
+
+.path-field{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+.pick-btn{min-width:52px;height:48px;border-radius:13px;border:1px solid var(--line2);background:#0c2815;color:var(--text);font-size:21px;cursor:pointer}
+.modal{position:fixed;inset:0;background:#000b;display:none;align-items:flex-end;justify-content:center;z-index:50;padding:14px}
+.modal.show{display:flex}
+.picker{width:min(720px,100%);max-height:86vh;background:#07160c;border:1px solid #285d36;border-radius:28px 28px 20px 20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 90px #000b}
+.picker-head{padding:18px;border-bottom:1px solid var(--line)}
+.picker-title{font-size:20px;font-weight:900}
+.crumbs{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+.crumb{border:0;background:#0c2a16;color:#bfe6c8;border-radius:10px;padding:7px 9px;font-size:11px;cursor:pointer}
+.picker-list{padding:8px 12px;overflow:auto;min-height:240px}
+.file-row{display:grid;grid-template-columns:42px 1fr auto;align-items:center;gap:10px;width:100%;background:transparent;border:0;border-bottom:1px solid #102719;color:var(--text);padding:12px 4px;text-align:left}
+.file-row.clickable{cursor:pointer}
+.file-icon{width:38px;height:38px;border-radius:11px;background:#0b2915;display:grid;place-items:center;color:var(--green);font-size:19px}
+.file-name{font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-meta{font-size:10px;color:var(--muted);margin-top:3px}
+.picker-actions{display:flex;gap:8px;padding:14px 16px 18px;border-top:1px solid var(--line)}
+.picker-actions .btn{flex:1}
+
+
+.warning-box{display:none;margin-top:12px;padding:12px 14px;border-radius:14px;border:1px solid #755e26;background:#2b2109;color:#ffe39a;font-size:12px;line-height:1.45}
+.warning-box.show{display:block}
+.history-card{margin-top:13px}
+.history-row{padding:11px 0;border-bottom:1px solid #12301a}
+.history-row:last-child{border-bottom:0}
+.history-row b{display:block}
+.history-row span{font-size:11px;color:var(--muted)}
+.footer{text-align:center;color:#53665a;font-size:11px;margin-top:38px}
+@media(max-width:480px){.app{padding:20px 18px 60px}.value{font-size:31px}.summary{grid-template-columns:1fr 1fr}.transfer-controls{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="eyebrow">RGH ENTERTAINMENT CENTER</div>
+  <div class="top">
+    <h1>Echo360</h1>
+    <button class="refresh" onclick="loadOverview()">↻</button>
+  </div>
+
+  <section class="card hero">
+    <div class="statusline">
+      <div>
+        <div class="status-main"><span id="xDot" class="dot"></span><span id="xStatus">Xbox...</span></div>
+        <div id="consoleMeta" class="muted" style="margin-top:7px">Conectando</div>
+      </div>
+      <div id="clock" class="muted small">--:--:--</div>
+    </div>
+    <div class="hero-services">
+      <div class="service"><b><span id="novaDot" class="dot"></span>NOVA</b><span id="novaText" class="muted">...</span></div>
+      <div class="service"><b><span id="ftpDot" class="dot"></span>FTPdll</b><span id="ftpText" class="muted">...</span></div>
+    </div>
+  </section>
+
+  <div class="section-head"><b>Agora</b><span id="latency">— ms</span></div>
+  <div class="temps">
+    <div class="card metric"><div class="kicker">CPU</div><div id="cpu" class="value">—</div><div class="bar"><div id="cpuBar"></div></div></div>
+    <div class="card metric"><div class="kicker">GPU</div><div id="gpu" class="value">—</div><div class="bar"><div id="gpuBar"></div></div></div>
+    <div class="card metric"><div class="kicker">eDRAM</div><div id="edram" class="value">—</div><div class="bar"><div id="edramBar"></div></div></div>
+    <div class="card metric"><div class="kicker">BOARD</div><div id="board" class="value">—</div><div class="bar"><div id="boardBar"></div></div></div>
+  </div>
+
+  <section class="card memory">
+    <div class="memory-row">
+      <div><div class="kicker">MEMÓRIA DO SISTEMA</div><div id="memText" style="font-size:22px;font-weight:850;margin-top:8px">—</div></div>
+      <div id="memPct" class="memory-pct">—</div>
+    </div>
+    <div class="bigbar"><div id="memBar"></div></div>
+    <div class="statusline muted small"><span id="memFree">Livre: —</span><span id="memTotal">Total: —</span></div>
+  </section>
+
+  <section class="card now">
+    <div class="kicker">EXECUTANDO AGORA</div>
+    <div class="game-row">
+      <div class="game-icon">X</div>
+      <div><div id="gameName" class="game-title">—</div><div id="gameMeta" class="muted small">—</div></div>
+    </div>
+    <div id="gamePath" class="path">—</div>
+  </section>
+
+  <div class="section-head"><b>Centro</b><span>v0.4.0 RC1</span></div>
+  <div class="center-grid">
+    <button class="center-btn" onclick="showPanel('system')"><div class="icon">▣</div><b>Sistema</b><p>Hardware e serviços</p></button>
+    <button class="center-btn active" onclick="showPanel('transfer')"><div class="icon">⇄</div><b>Transferir</b><p>EchoTransfer v0.4.0 RC1</p></button>
+    <button class="center-btn" onclick="showPanel('library')"><div class="icon">▦</div><b>Biblioteca</b><p>Jogos instalados · próximo</p></button>
+    <button class="center-btn" onclick="showPanel('performance')"><div class="icon">⚡</div><b>Performance</b><p>EchoBoost · futuro</p></button>
+    <button class="center-btn" onclick="showPanel('controls')"><div class="icon">⌁</div><b>Controles</b><p>EchoPad · futuro</p></button>
+    <button class="center-btn" onclick="showPanel('backup')"><div class="icon">▣</div><b>Backups</b><p>EchoCloud · próximo</p></button>
+  </div>
+
+  <section id="transfer" class="panel show card">
+    <div class="kicker">ECHOTRANSFER v0.4.0 RC1</div>
+    <h2 style="margin:7px 0 2px">Comparar e transferir</h2>
+    <div class="mode-note">Nada é apagado do Xbox. “Pausar” e “Cancelar” entram em ação após o arquivo atual terminar.</div>
+
+    <label>Origem no celular</label>
+    <div class="path-field">
+      <input id="localRoot" value="/storage/emulated/0/Download">
+      <button class="pick-btn" onclick="openPicker('local')" title="Escolher pasta">📁</button>
+    </div>
+
+    <label>Destino no Xbox</label>
+    <div class="path-field">
+      <input id="remoteRoot" value="/Hdd1/Games">
+      <button class="pick-btn" onclick="openPicker('remote')" title="Escolher pasta">📁</button>
+    </div>
+
+    <div class="transfer-controls">
+      <div>
+        <label>Modo de conexão</label>
+        <select id="mode">
+          <option value="auto">Auto — Aurora se disponível, FTPdll se necessário</option>
+          <option value="fast">Rápido — Aurora FTP :21</option>
+          <option value="background">Background — FTPdll :7564</option>
+        </select>
+      </div>
+      <div>
+        <label>Arquivos a enviar</label>
+        <select id="strategy">
+          <option value="missing-and-different">Ausentes + tamanho diferente</option>
+          <option value="missing-only">Somente ausentes</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="btnrow">
+      <button id="analyzeBtn" class="btn" onclick="analyze()">Analisar</button>
+      <button id="startBtn" class="btn primary" onclick="startTransfer()" disabled>Transferir diferenças</button>
+    </div>
+
+    <div id="analysisSummary" class="summary" style="display:none">
+      <div class="sum"><b id="sameCount">0</b><span>IDÊNTICOS</span></div>
+      <div class="sum"><b id="missingCount">0</b><span>AUSENTES</span></div>
+      <div class="sum"><b id="differentCount">0</b><span>DIFERENTES</span></div>
+      <div class="sum"><b id="uploadSize">0 B</b><span>A ENVIAR</span></div>
+    </div>
+
+    <div id="progressCard" class="progress-card" style="display:none">
+      <div class="progress-top">
+        <div id="progressName" class="progress-name">Preparando...</div>
+        <div id="progressPercent">0%</div>
+      </div>
+      <div class="bigbar"><div id="progressBar"></div></div>
+      <div class="stats">
+        <div class="stat">ARQUIVOS<b id="fileStat">0 / 0</b></div>
+        <div class="stat">VELOCIDADE<b id="speedStat">—</b></div>
+        <div class="stat">ETA<b id="etaStat">—</b></div>
+      </div>
+      <div class="mode-note">Conexão ativa: <b id="activeMode">—</b> <span id="failover"></span></div>
+      <div class="btnrow">
+        <button id="pauseBtn" class="btn warn" onclick="pauseTransfer()">Pausar após arquivo</button>
+        <button id="resumeBtn" class="btn" onclick="resumeTransfer()" style="display:none">Retomar</button>
+        <button id="cancelBtn" class="btn bad" onclick="cancelTransfer()">Cancelar após arquivo</button>
+      </div>
+    </div>
+
+    <div id="warningBox" class="warning-box"></div>
+    <div id="result" class="result">Pronto para analisar.</div>
+
+    <div class="card history-card" style="padding:15px">
+      <div class="kicker">HISTÓRICO RECENTE</div>
+      <div id="historyList" class="muted small" style="margin-top:8px">Nenhuma transferência registrada.</div>
+    </div>
+  </section>
+
+  <section id="system" class="panel card"><div class="kicker">SISTEMA</div><div id="systemText" class="result">—</div></section>
+  <section id="library" class="panel card"><div class="kicker">BIBLIOTECA</div><div class="result">Próxima milestone: listar jogos, capas, TU, tamanho e botão Jogar.</div></section>
+  <section id="performance" class="panel card"><div class="kicker">ECHOBOOST</div><div class="result">Ainda não aplica patches. Primeiro vamos construir identificação por Title ID + Media ID + TU + hash e rollback.</div></section>
+  <section id="controls" class="panel card"><div class="kicker">ECHOPAD</div><div class="result">Próxima fase: perfis, deadzone e diagnóstico de controles modernos.</div></section>
+  <section id="backup" class="panel card"><div class="kicker">ECHOCLOUD</div><div class="result">O Toolkit já cria snapshots do launch.ini. Em breve o Companion vai listar e copiar os backups para o celular.</div></section>
+
+
+  <div id="folderModal" class="modal" onclick="if(event.target===this)closePicker()">
+    <div class="picker">
+      <div class="picker-head">
+        <div id="pickerTitle" class="picker-title">Escolher pasta</div>
+        <div id="pickerCrumbs" class="crumbs"></div>
+      </div>
+      <div id="pickerList" class="picker-list"></div>
+      <div class="picker-actions">
+        <button class="btn" onclick="closePicker()">Cancelar</button>
+        <button class="btn primary" onclick="selectCurrentFolder()">Selecionar esta pasta</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">Echo360 Companion • transferências seguras • nenhum delete remoto</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let lastOverview=null;
+let lastAnalysis=null;
+let jobId=null;
+let jobTimer=null;
+let currentAnalysisId=null;
+
+const PREF_KEY='echo360-transfer-prefs-v1';
+
+function savePrefs(){
+  try{
+    localStorage.setItem(PREF_KEY,JSON.stringify({
+      localRoot:$('localRoot')?.value||'',
+      remoteRoot:$('remoteRoot')?.value||'',
+      mode:$('mode')?.value||'auto',
+      strategy:$('strategy')?.value||'missing-and-different'
+    }));
+  }catch{}
+}
+
+function loadPrefs(){
+  try{
+    const p=JSON.parse(localStorage.getItem(PREF_KEY)||'null');
+    if(!p)return;
+    if(p.localRoot)$('localRoot').value=p.localRoot;
+    if(p.remoteRoot)$('remoteRoot').value=p.remoteRoot;
+    if(p.mode)$('mode').value=p.mode;
+    if(p.strategy)$('strategy').value=p.strategy;
+  }catch{}
+}
+
+let pickerType=null;
+let pickerPath=null;
+let pickerRequestSeq=0;
+let pickerBusy=false;
+
+function pickerJoin(base,name){
+  if(pickerType==='local'){
+    return (base.replace(/\/$/,'')+'/'+name).replace(/\/+/g,'/');
+  }
+  return ('/'+[...base.split('/').filter(Boolean),name].join('/')).replace(/\/+/g,'/');
+}
+
+function buildCrumbs(){
+  const box=$('pickerCrumbs');
+  box.innerHTML='';
+
+  const parts=pickerPath.split('/').filter(Boolean);
+  const rootPath=pickerType==='local'?'/storage/emulated/0':'/';
+  const rootBtn=document.createElement('button');
+  rootBtn.className='crumb';
+  rootBtn.textContent=pickerType==='local'?'Armazenamento':'Xbox';
+  rootBtn.onclick=()=>navigatePicker(rootPath);
+  box.appendChild(rootBtn);
+
+  let current=rootPath;
+  let startIndex=0;
+  if(pickerType==='local' && parts.slice(0,3).join('/')==='storage/emulated/0'){
+    startIndex=3;
+  }
+
+  for(let i=startIndex;i<parts.length;i++){
+    current=pickerType==='local'
+      ? current.replace(/\/$/,'')+'/'+parts[i]
+      : ('/'+[...current.split('/').filter(Boolean),parts[i]].join('/'));
+
+    const b=document.createElement('button');
+    b.className='crumb';
+    b.textContent=parts[i];
+    const target=current;
+    b.onclick=()=>navigatePicker(target);
+    box.appendChild(b);
+  }
+}
+
+async function openPicker(type){
+  pickerType=type;
+  pickerPath=(type==='local'?$('localRoot').value:$('remoteRoot').value).trim();
+  if(!pickerPath) pickerPath=type==='local'?'/storage/emulated/0':'/';
+  $('pickerTitle').textContent=type==='local'
+    ?'Escolher pasta no celular'
+    :'Escolher pasta no Xbox';
+  $('folderModal').classList.add('show');
+  await navigatePicker(pickerPath);
+}
+
+function closePicker(){
+  $('folderModal').classList.remove('show');
+}
+
+async function navigatePicker(target){
+  const seq=++pickerRequestSeq;
+  pickerBusy=true;
+
+  const list=$('pickerList');
+  list.innerHTML='<div class="muted" style="padding:20px">Carregando...</div>';
+
+  try{
+    const endpoint=pickerType==='local'
+      ? '/api/local/list?path='+encodeURIComponent(target)
+      : '/api/remote/list?mode='+encodeURIComponent($('mode').value)+'&path='+encodeURIComponent(target);
+
+    const r=await fetch(endpoint,{cache:'no-store'});
+    const d=await r.json();
+    if(seq!==pickerRequestSeq) return;
+    if(!r.ok) throw new Error(d.error||'Falha ao listar pasta');
+
+    pickerPath=d.path;
+    buildCrumbs();
+    list.innerHTML='';
+
+    if(d.parent){
+      const up=document.createElement('button');
+      up.className='file-row clickable';
+      up.innerHTML='<div class="file-icon">↰</div><div><div class="file-name">Subir uma pasta</div><div class="file-meta"></div></div><div>›</div>';
+      up.querySelector('.file-meta').textContent=d.parent;
+      up.onclick=()=>navigatePicker(d.parent);
+      list.appendChild(up);
+    }
+
+    const folders=(d.items||[]).filter(x=>x.directory);
+    const files=(d.items||[]).filter(x=>!x.directory);
+
+    for(const x of folders){
+      const row=document.createElement('button');
+      row.className='file-row clickable';
+      row.innerHTML='<div class="file-icon">📁</div><div><div class="file-name"></div><div class="file-meta">Pasta</div></div><div>›</div>';
+      row.querySelector('.file-name').textContent=x.name;
+      row.onclick=()=>navigatePicker(pickerJoin(d.path,x.name));
+      list.appendChild(row);
+    }
+
+    for(const x of files.slice(0,100)){
+      const row=document.createElement('div');
+      row.className='file-row';
+      row.innerHTML='<div class="file-icon">•</div><div><div class="file-name"></div><div class="file-meta"></div></div><div></div>';
+      row.querySelector('.file-name').textContent=x.name;
+      row.querySelector('.file-meta').textContent=fmtBytes(x.size);
+      list.appendChild(row);
+    }
+
+    if(!folders.length && !files.length){
+      list.innerHTML='<div class="muted" style="padding:24px;text-align:center">Pasta vazia</div>';
+    }
+  }catch(e){
+    if(seq===pickerRequestSeq){
+      list.innerHTML='<div style="padding:20px;color:#ff8b92">Erro: '+e.message+'</div>';
+    }
+  }finally{
+    if(seq===pickerRequestSeq) pickerBusy=false;
+  }
+}
+
+function selectCurrentFolder(){
+  if(pickerType==='local') $('localRoot').value=pickerPath;
+  else $('remoteRoot').value=pickerPath;
+
+  lastAnalysis=null;
+  currentAnalysisId=null;
+  $('startBtn').disabled=true;
+  $('analysisSummary').style.display='none';
+  $('warningBox').classList.remove('show');
+  savePrefs();
+  closePicker();
+}
+
+
+function showPanel(id){
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('show'));
+  $(id).classList.add('show');
+  document.querySelectorAll('.center-btn').forEach(x=>x.classList.remove('active'));
+  event?.currentTarget?.classList.add('active');
+  $(id).scrollIntoView({behavior:'smooth',block:'start'});
+}
+function fmtBytes(n){
+  n=Number(n||0);
+  if(n<1024)return n+' B';
+  if(n<1048576)return (n/1024).toFixed(1)+' KB';
+  if(n<1073741824)return (n/1048576).toFixed(1)+' MB';
+  return (n/1073741824).toFixed(2)+' GB';
+}
+function fmtSpeed(n){return n>0?fmtBytes(n)+'/s':'—'}
+function fmtEta(s){
+  if(!Number.isFinite(Number(s))||s<0)return '—';
+  s=Math.ceil(s);
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
+  return h?`${h}h ${m}m`:(m?`${m}m ${sec}s`:`${sec}s`);
+}
+function fmtTemp(n){return Number.isFinite(Number(n))?Number(n).toFixed(1)+'°':'—'}
+function tempBar(id,n){$(id).style.width=Math.max(0,Math.min(100,Number(n||0)/80*100))+'%'}
+function setDot(id,on){$(id).classList.toggle('on',!!on)}
+
+async function loadOverview(){
+  try{
+    const r=await fetch('/api/overview',{cache:'no-store'});
+    const d=await r.json();
+    lastOverview=d;
+
+    setDot('xDot',d.xbox?.online);
+    $('xStatus').textContent=d.xbox?.online?'Xbox conectado':'Xbox offline';
+    $('consoleMeta').textContent=[d.system?.console?.motherboard,d.system?.console?.type].filter(Boolean).join(' • ')||'—';
+    $('clock').textContent=new Date().toLocaleTimeString('pt-BR');
+    $('latency').textContent=(d.requestMs??'—')+' ms';
+
+    setDot('novaDot',d.nova?.online);
+    $('novaText').textContent=d.nova?.online?`Online · :${d.nova.port}`:'Offline';
+
+    setDot('ftpDot',d.ftp?.background?.online);
+    $('ftpText').textContent=d.ftp?.background?.online?`Online · :${d.ftp.background.port}`:'Offline';
+
+    const t=d.temperature||{};
+    $('cpu').textContent=fmtTemp(t.cpu);tempBar('cpuBar',t.cpu);
+    $('gpu').textContent=fmtTemp(t.gpu);tempBar('gpuBar',t.gpu);
+    $('edram').textContent=fmtTemp(t.memory);tempBar('edramBar',t.memory);
+    $('board').textContent=fmtTemp(t.case);tempBar('boardBar',t.case);
+
+    const m=d.memory||{};
+    const pct=Number(m.usedPercent||0);
+    $('memText').textContent=fmtBytes(m.used)+' usados';
+    $('memPct').textContent=pct.toFixed(1)+'%';
+    $('memBar').style.width=Math.min(100,pct)+'%';
+    $('memFree').textContent='Livre: '+fmtBytes(m.free);
+    $('memTotal').textContent='Total: '+fmtBytes(m.total);
+
+    const ti=d.title||{};
+    $('gameName').textContent=(ti.path||'').toLowerCase().includes('aurora')?'Aurora':(ti.titleid||'Título atual');
+    $('gameMeta').textContent=`${ti.titleid||'0x00000000'} · ${ti.mediaid||'0x00000000'} · TU ${ti.tuver??0}`;
+    $('gamePath').textContent=ti.path||'—';
+
+    const fast=d.ftp?.fast;
+    const bg=d.ftp?.background;
+    const sys=[
+      `Xbox: ${d.xbox?.host||'—'}`,
+      `Hardware: ${d.system?.console?.motherboard||'—'} • ${d.system?.console?.type||'—'}`,
+      `Kernel: ${d.system?.version?.build||'—'}`,
+      `NOVA: ${d.nova?.online?'online':'offline'} :${d.nova?.port||'—'}`,
+      `${fast?.label||'Aurora FTP'}: ${fast?.online?'online':'offline'} :${fast?.port||21}`,
+      `${bg?.label||'FTPdll'}: ${bg?.online?'online':'offline'} :${bg?.port||7564}`,
+      `DashLaunch: ${d.dashlaunch?.version?.number ? JSON.stringify(d.dashlaunch.version.number):'—'}`,
+      '',
+      'Plugins:',
+      ...(d.dashlaunch?.plugins||[]).map(x=>`${x.name}: ${x.value||'<vazio>'}`)
+    ];
+    $('systemText').textContent=sys.join('\n');
+  }catch(e){
+    $('xStatus').textContent='Companion com erro';
+    setDot('xDot',false);
+  }
+}
+
+async function analyze(){
+  $('analyzeBtn').disabled=true;
+  $('startBtn').disabled=true;
+  $('result').textContent='Analisando pasta local e Xbox...';
+  try{
+    const body={
+      localRoot:$('localRoot').value.trim(),
+      remoteRoot:$('remoteRoot').value.trim(),
+      mode:$('mode').value,
+      strategy:$('strategy').value
+    };
+    const r=await fetch('/api/compare',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Falha na análise');
+    lastAnalysis=d;
+    currentAnalysisId=d.analysisId||null;
+    savePrefs();
+
+    const warnings=d.warnings||[];
+    if(warnings.length){
+      $('warningBox').textContent='⚠ '+warnings.join(' ');
+      $('warningBox').classList.add('show');
+    }else{
+      $('warningBox').classList.remove('show');
+      $('warningBox').textContent='';
+    }
+
+    $('analysisSummary').style.display='grid';
+    $('sameCount').textContent=d.sameCount;
+    $('missingCount').textContent=d.missing.length;
+    $('differentCount').textContent=d.different.length;
+    $('uploadSize').textContent=fmtBytes(d.uploadBytes);
+    $('startBtn').disabled=d.uploadCount===0;
+
+    const lines=[
+      `Conexão usada: ${d.modeUsed}`,
+      `Arquivos locais: ${d.localFiles}`,
+      `Arquivos remotos: ${d.remoteFiles}`,
+      `Idênticos: ${d.sameCount}`,
+      `Ausentes: ${d.missing.length}`,
+      `Tamanho diferente: ${d.different.length}`,
+      `Para enviar: ${d.uploadCount} arquivo(s) • ${fmtBytes(d.uploadBytes)}`,
+      '',
+      d.missing.length?'Ausentes:\n'+d.missing.slice(0,30).map(x=>'+ '+x.file).join('\n'):'',
+      d.different.length?'\nDiferentes:\n'+d.different.slice(0,30).map(x=>`! ${x.file} (${fmtBytes(x.remoteSize)} → ${fmtBytes(x.localSize)})`).join('\n'):'',
+      '',
+      'Segurança: nenhum arquivo remoto foi apagado.'
+    ].filter(Boolean);
+    $('result').textContent=lines.join('\n');
+  }catch(e){
+    $('result').textContent='Erro: '+e.message;
+  }finally{
+    $('analyzeBtn').disabled=false;
+  }
+}
+
+async function startTransfer(){
+  const body={
+    localRoot:$('localRoot').value.trim(),
+    remoteRoot:$('remoteRoot').value.trim(),
+    mode:$('mode').value,
+    strategy:$('strategy').value,
+    analysisId:currentAnalysisId
+  };
+  const r=await fetch('/api/transfer/start',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok){$('result').textContent='Erro: '+(d.error||'Falha');return}
+  jobId=d.id;
+  $('progressCard').style.display='block';
+  $('startBtn').disabled=true;
+  pollJob();
+  clearInterval(jobTimer);
+  jobTimer=setInterval(pollJob,700);
+}
+
+async function pollJob(){
+  if(!jobId)return;
+  try{
+    const r=await fetch('/api/transfer/'+jobId,{cache:'no-store'});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Falha no job');
+
+    $('progressPercent').textContent=(d.percent||0).toFixed(1)+'%';
+    $('progressBar').style.width=Math.max(0,Math.min(100,d.percent||0))+'%';
+    $('progressName').textContent=d.current?.relative || ({
+      queued:'Na fila...',preparing:'Comparando antes de enviar...',paused:'Pausado',completed:'Concluído',cancelled:'Cancelado',failed:'Falhou'
+    }[d.status]||d.status);
+    $('fileStat').textContent=`${d.completedFiles} / ${d.totalFiles}`;
+    $('speedStat').textContent=fmtSpeed(d.speedBps);
+    $('etaStat').textContent=fmtEta(d.etaSeconds);
+    $('activeMode').textContent=d.activeMode==='fast'?'Aurora FTP :21':d.activeMode==='background'?'FTPdll :7564':'—';
+    $('failover').textContent=d.failovers?` • ${d.failovers} troca(s) automática(s)`:''
+
+    $('pauseBtn').style.display=d.status==='paused'?'none':'inline-block';
+    $('resumeBtn').style.display=d.status==='paused'?'inline-block':'none';
+
+    const log=(d.log||[]).slice(-10).map(x=>x.message).join('\n');
+    $('result').textContent=[
+      `Status: ${d.status}`,
+      `Total: ${fmtBytes(d.bytesDone)} / ${fmtBytes(d.totalBytes)}`,
+      d.current?`Atual: ${d.current.relative} • ${(d.current.percent||0).toFixed(1)}%`:'',
+      '',
+      log
+    ].filter(Boolean).join('\n');
+
+    if(['completed','failed','cancelled'].includes(d.status)){
+      clearInterval(jobTimer);
+      jobTimer=null;
+      $('startBtn').disabled=false;
+      if(d.status==='completed') await analyze();
+      await loadHistory();
+    }
+  }catch(e){
+    $('result').textContent='Erro ao acompanhar: '+e.message;
+  }
+}
+async function jobAction(action){
+  if(!jobId)return;
+  const r=await fetch(`/api/transfer/${jobId}/${action}`,{method:'POST'});
+  const d=await r.json();
+  if(!r.ok)$('result').textContent='Erro: '+(d.error||'Falha');
+  else pollJob();
+}
+function pauseTransfer(){jobAction('pause')}
+function resumeTransfer(){jobAction('resume')}
+function cancelTransfer(){if(confirm('Cancelar depois que o arquivo atual terminar?'))jobAction('cancel')}
+
+async function loadHistory(){
+  try{
+    const r=await fetch('/api/history',{cache:'no-store'});
+    const rows=await r.json();
+
+    if(!Array.isArray(rows)||!rows.length){
+      $('historyList').textContent='Nenhuma transferência registrada.';
+      return;
+    }
+
+    $('historyList').innerHTML='';
+    for(const h of rows.slice(0,8)){
+      const row=document.createElement('div');
+      row.className='history-row';
+
+      const status=h.status==='completed'
+        ?'Concluída'
+        :h.status==='cancelled'
+          ?'Cancelada'
+          :'Falhou';
+
+      row.innerHTML='<b></b><span></span>';
+      row.querySelector('b').textContent=
+        `${status} • ${h.completedFiles||0}/${h.totalFiles||0} arquivos`;
+      row.querySelector('span').textContent=
+        `${h.activeMode||h.requestedMode||'—'} • ${fmtBytes(h.totalBytes||0)} • verificados: ${h.verifiedFiles||0}`;
+      $('historyList').appendChild(row);
+    }
+  }catch{}
+}
+
+function invalidateAnalysis(){
+  currentAnalysisId=null;
+  lastAnalysis=null;
+  $('startBtn').disabled=true;
+  $('analysisSummary').style.display='none';
+  $('warningBox').classList.remove('show');
+  savePrefs();
+}
+
+loadPrefs();
+['localRoot','remoteRoot','mode','strategy'].forEach(id=>{
+  $(id)?.addEventListener('change',invalidateAnalysis);
+});
+loadHistory();
+loadOverview();
+setInterval(loadOverview,15000);
+</script>
+</body>
+</html>

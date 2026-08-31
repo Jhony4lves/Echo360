@@ -1,0 +1,9 @@
+{
+  "name": "Echo360 Entertainment Center",
+  "short_name": "Echo360",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#041008",
+  "theme_color": "#06130a",
+  "description": "Centro de entretenimento e gerenciamento para Xbox 360 RGH"
+}

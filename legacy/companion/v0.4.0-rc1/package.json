@@ -1,0 +1,14 @@
+{
+  "name": "echo360-companion",
+  "version": "0.4.0-rc1",
+  "private": true,
+  "description": "Echo360 Entertainment Center companion for Xbox 360 RGH",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "basic-ftp": "^6.2.0",
+    "express": "^5.1.0"
+  }
+}

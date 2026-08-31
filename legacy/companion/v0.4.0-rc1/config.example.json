@@ -1,0 +1,31 @@
+{
+  "httpPort": 8760,
+  "xbox": {
+    "host": "192.168.1.100"
+  },
+  "nova": {
+    "port": 9999,
+    "username": "YOUR_NOVA_USERNAME",
+    "password": "YOUR_NOVA_PASSWORD",
+    "timeoutMs": 5000
+  },
+  "ftpFast": {
+    "label": "Aurora FTP",
+    "port": 21,
+    "username": "YOUR_AURORA_FTP_USERNAME",
+    "password": "YOUR_AURORA_FTP_PASSWORD",
+    "timeoutMs": 15000,
+    "allowSeparateTransferHost": false
+  },
+  "ftpBackground": {
+    "label": "FTPdll",
+    "port": 7564,
+    "username": "YOUR_FTPDLL_USERNAME",
+    "password": "YOUR_FTPDLL_PASSWORD",
+    "timeoutMs": 20000,
+    "allowSeparateTransferHost": true
+  },
+  "localRoots": [
+    "/storage/emulated/0"
+  ]
+}
