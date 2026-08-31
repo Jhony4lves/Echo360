@@ -9,11 +9,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.jhony4lves.echo360"
+        applicationId = "com.jhony.sfp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-alpha01"
+        versionCode = 2
+        versionName = "0.1.0-alpha02-hardware"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
