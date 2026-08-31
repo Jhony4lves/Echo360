@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.jhony.sfp"
+        applicationId = "com.jhony4lves.echo360"
         minSdk = 26
         targetSdk = 35
         versionCode = 2
