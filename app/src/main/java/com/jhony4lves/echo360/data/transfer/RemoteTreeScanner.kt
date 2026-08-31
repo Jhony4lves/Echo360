@@ -5,6 +5,7 @@ import com.jhony4lves.echo360.domain.transfer.RemoteTransferFile
 import com.jhony4lves.echo360.domain.transfer.normalizeRelativePath
 import com.jhony4lves.echo360.domain.transfer.relativeKey
 import com.jhony4lves.echo360.domain.xbox.XboxPath
+import com.jhony4lves.echo360.network.ftp.FtpPathNotFoundException
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 
 class RemoteTreeScanner {
@@ -42,7 +43,15 @@ class RemoteTreeScanner {
             }
         }
 
-        walk(root, "")
+        try {
+            walk(root, "")
+        } catch (error: FtpPathNotFoundException) {
+            // A brand-new destination root is a valid transfer target. Treat it
+            // as an empty remote tree; upload() will create the directories.
+            if (XboxPath.canonical(error.canonicalPath) != root) throw error
+            return emptyList()
+        }
+
         return remoteFiles
     }
 }
