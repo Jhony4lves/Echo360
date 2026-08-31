@@ -19,6 +19,15 @@ internal data class FtpReply(
     val isPreliminary: Boolean get() = code == 125 || code == 150
 }
 
+internal fun FtpReply.isMissingPathReply(): Boolean {
+    if (code != 550) return false
+    val normalized = text.lowercase()
+    return normalized.contains("path not found") ||
+        normalized.contains("no such file") ||
+        normalized.contains("not found") ||
+        normalized.contains("cannot find")
+}
+
 internal object FtpReplyParser {
     fun read(reader: BufferedReader): FtpReply {
         val first = reader.readLine() ?: throw EOFException("FTP fechou a conexão sem resposta.")
@@ -45,6 +54,11 @@ internal class FtpProtocolException(
     message: String,
 ) : IOException(message)
 
+internal class FtpPathNotFoundException(
+    val canonicalPath: String,
+    val serverReply: String,
+) : IOException("Caminho remoto não encontrado: $canonicalPath")
+
 internal class FtpStageTimeoutException(
     val stage: String,
     cause: SocketTimeoutException,
@@ -54,6 +68,7 @@ internal class FtpCommandChannel(
     private val host: String,
     private val port: Int,
     private val timeoutMs: Int,
+    private val connectTimeoutMs: Int = timeoutMs,
 ) : Closeable {
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
@@ -75,7 +90,7 @@ internal class FtpCommandChannel(
             keepAlive = true
             tcpNoDelay = true
             try {
-                connect(InetSocketAddress(host, port), timeoutMs)
+                connect(InetSocketAddress(host, port), connectTimeoutMs)
             } catch (error: SocketTimeoutException) {
                 throw FtpStageTimeoutException("conexão TCP de controle", error)
             }
