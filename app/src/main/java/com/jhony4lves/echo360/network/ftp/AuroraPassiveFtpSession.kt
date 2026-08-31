@@ -22,7 +22,13 @@ class AuroraPassiveFtpSession private constructor(
         withContext(Dispatchers.IO) {
             val canonical = XboxPath.canonical(canonicalPath)
             val remote = XboxPath.toAuroraFtpPath(canonical)
-            expectPositive(channel.command("CWD $remote"), "Aurora recusou CWD.")
+            val cwd = channel.command("CWD $remote")
+            if (!cwd.isPositive) {
+                if (cwd.isMissingPathReply()) {
+                    throw FtpPathNotFoundException(canonical, cwd.text)
+                }
+                throw FtpProtocolException(cwd.code, "Aurora recusou CWD: ${cwd.text}")
+            }
 
             openPassiveSocket().use { dataSocket ->
                 channel.send("LIST")
@@ -179,10 +185,16 @@ class AuroraPassiveFtpSession private constructor(
         suspend fun connect(
             profile: XboxProfile,
             timeoutMs: Int = 15_000,
+            connectTimeoutMs: Int = 1_200,
         ): AuroraPassiveFtpSession = withContext(Dispatchers.IO) {
             val endpoint = profile.endpoint.validated()
             val credentials = profile.credentials
-            val channel = FtpCommandChannel(endpoint.host, endpoint.auroraFtpPort, timeoutMs)
+            val channel = FtpCommandChannel(
+                host = endpoint.host,
+                port = endpoint.auroraFtpPort,
+                timeoutMs = timeoutMs,
+                connectTimeoutMs = connectTimeoutMs,
+            )
             channel.connectAndLogin(
                 credentials.auroraFtpUsername,
                 credentials.auroraFtpPassword,
