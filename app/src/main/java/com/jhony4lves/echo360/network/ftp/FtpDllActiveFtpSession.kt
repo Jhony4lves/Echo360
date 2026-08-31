@@ -22,7 +22,13 @@ class FtpDllActiveFtpSession private constructor(
         withContext(Dispatchers.IO) {
             val canonical = XboxPath.canonical(canonicalPath)
             val remote = XboxPath.toFtpDllPath(canonical)
-            requirePositive(channel.command("CWD $remote"), "FTPdll recusou CWD.")
+            val cwd = channel.command("CWD $remote")
+            if (!cwd.isPositive) {
+                if (cwd.isMissingPathReply()) {
+                    throw FtpPathNotFoundException(canonical, cwd.text)
+                }
+                throw FtpProtocolException(cwd.code, "FTPdll recusou CWD: ${cwd.text}")
+            }
 
             prepareActiveListener().use { listener ->
                 channel.send("LIST")
