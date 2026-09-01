@@ -19,6 +19,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Temporary side-by-side package for the EchoConvert field test.
+            // This avoids replacing an older Echo360 build that may have been
+            // signed with a different debug key.
+            applicationIdSuffix = ".convert"
+            versionNameSuffix = "-convert-test"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
