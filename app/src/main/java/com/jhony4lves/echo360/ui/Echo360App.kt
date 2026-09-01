@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.ui.components.EchoBackdrop
 import com.jhony4lves.echo360.ui.components.EchoNavGlyph
+import com.jhony4lves.echo360.ui.convert.EchoConvertScreen
 import com.jhony4lves.echo360.ui.home.EchoPlayerHomeScreen
 import com.jhony4lves.echo360.ui.library.EchoPlayerLibraryScreen
 import com.jhony4lves.echo360.ui.system.XboxSystemScreen
@@ -31,6 +32,7 @@ private enum class EchoDestination(
     Home("Home", "HM"),
     Library("Jogos", "LB"),
     Transfer("Transfer", "TX"),
+    Convert("Convert", "CV"),
     System("Xbox", "XB"),
 }
 
@@ -79,6 +81,10 @@ fun Echo360App() {
                     )
 
                     EchoDestination.Transfer -> EchoTransferScreen(
+                        modifier = Modifier.padding(innerPadding),
+                    )
+
+                    EchoDestination.Convert -> EchoConvertScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
 
