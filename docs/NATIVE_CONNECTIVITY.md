@@ -26,7 +26,20 @@ NOVA: the current native client performs a TCP reachability check only. It inten
 
 Aurora FTP and FTPdll: the native control channel performs `USER` / `PASS`, switches to `TYPE I`, reports normalized auth/busy/network states and sends `QUIT` before closing.
 
+If a full FTP check fails, the UI runs a separate minimal TCP probe. This distinguishes an Android routing failure from a protocol/control-channel failure without doubling the number of connections during successful checks.
+
 No password is included in errors or logs.
+
+### Hardware validation — 2026-09-01
+
+The native implementation was validated against the target Xbox 360 without rebooting the console:
+
+- NOVA responded on port `9999`.
+- Aurora authenticated on port `21`, negotiated passive mode with `PASV` and listed the remote root.
+- FTPdll authenticated on port `7564`, negotiated active mode with `PORT` and listed the remote root.
+- More than ten consecutive **Save and test** cycles completed successfully for all three transports.
+
+The recurring pattern where FTP worked once and later timed out was traced to failed control-channel setup. `FtpCommandChannel.connectAndLogin()` could throw before a session object reached the repository, leaving that partially initialized socket outside the repository's cleanup path. The channel now closes its streams and socket on every setup failure. A regression test verifies that the server observes EOF after a rejected login.
 
 ## Native data sessions
 
@@ -62,4 +75,4 @@ Neither session implements destructive delete operations.
 - `Background` -> FTPdll active FTP
 - `Auto` -> Fast first, then Background if Fast cannot establish a session
 
-The EchoTransfer layer will add comparison plans, queue state, retries, speed/ETA, post-upload verification and in-job failover on top of these sessions.
+The EchoTransfer layer adds comparison plans, queue state, retries, speed/ETA, post-upload verification and in-job failover on top of these sessions.

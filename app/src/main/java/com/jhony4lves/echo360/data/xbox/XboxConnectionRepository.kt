@@ -85,12 +85,6 @@ class XboxConnectionRepository(
             )
         }
 
-        // Run the exact same minimal TCP path used by the working NOVA health
-        // check before exercising the FTP protocol. Keeping both results in the
-        // card lets hardware QA distinguish Android routing/UID failures from a
-        // failure inside FtpCommandChannel without ADB or packet capture.
-        val directProbe = tcpPortProbe.probe(profile.endpoint.host, port)
-
         var session: XboxFtpSession? = null
         val startedAt = System.currentTimeMillis()
         return try {
@@ -106,10 +100,10 @@ class XboxConnectionRepository(
                 status = TransportStatus.Connected,
                 detail = when (transport) {
                     XboxTransport.AuroraFtp ->
-                        "TCP direto OK (${directProbe.latencyLabel()}). Fast validado: login + PASV + LIST da raiz ($rootEntries entradas)."
+                        "Fast validado: login + PASV + LIST da raiz ($rootEntries entradas)."
 
                     XboxTransport.FtpDll ->
-                        "TCP direto OK (${directProbe.latencyLabel()}). Background validado: login + PORT + LIST da raiz ($rootEntries entradas)."
+                        "Background validado: login + PORT + LIST da raiz ($rootEntries entradas)."
 
                     XboxTransport.Nova -> "Conectado."
                 },
@@ -122,6 +116,11 @@ class XboxConnectionRepository(
                 error = error,
                 elapsedMs = System.currentTimeMillis() - startedAt,
             )
+            // A successful FTP check already proves TCP reachability. Probe
+            // only after failure so normal health checks do not open a second
+            // control connection. The A/B result still distinguishes Android
+            // routing failures from failures inside the FTP command channel.
+            val directProbe = tcpPortProbe.probe(profile.endpoint.host, port)
             failure.copy(
                 detail = if (directProbe.reachable) {
                     "TCP direto ABRIU (${directProbe.latencyLabel()}), mas o canal FTP falhou. ${failure.detail}"

@@ -12,8 +12,8 @@ android {
         applicationId = "com.jhony4lves.echo360"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.0-alpha03-network-diagnostic"
+        versionCode = 4
+        versionName = "0.1.0-alpha04-hardware-fix"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
