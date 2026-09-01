@@ -85,50 +85,63 @@ internal class FtpCommandChannel(
         require(username.isNotBlank()) { "Usuário FTP não configurado." }
         require(password.isNotBlank()) { "Senha FTP não configurada." }
 
-        val connected = Socket().apply {
-            soTimeout = timeoutMs
-            keepAlive = true
-            tcpNoDelay = true
+        val connected = Socket()
+        try {
+            connected.soTimeout = timeoutMs
+            connected.keepAlive = true
+            connected.tcpNoDelay = true
             try {
-                connect(InetSocketAddress(host, port), connectTimeoutMs)
+                connected.connect(InetSocketAddress(host, port), connectTimeoutMs)
             } catch (error: SocketTimeoutException) {
                 throw FtpStageTimeoutException("conexão TCP de controle", error)
             }
-        }
-        socket = connected
-        reader = connected.getInputStream().bufferedReader(Charsets.US_ASCII)
-        writer = connected.getOutputStream().bufferedWriter(Charsets.US_ASCII)
 
-        expectedReplyStage = "banner FTP"
-        val banner = read()
-        if (banner.code == 421) {
-            throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
-        }
-        if (!banner.isPositive) {
-            throw FtpProtocolException(banner.code, "Servidor FTP recusou a conexão.")
-        }
+            socket = connected
+            reader = connected.getInputStream().bufferedReader(Charsets.US_ASCII)
+            writer = connected.getOutputStream().bufferedWriter(Charsets.US_ASCII)
 
-        send("USER $username", "resposta USER")
-        val userReply = read()
-        when (userReply.code) {
-            230 -> Unit
-            331 -> {
-                send("PASS $password", "resposta PASS")
-                val passReply = read()
-                if (passReply.code == 421) {
-                    throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
-                }
-                if (passReply.code != 230) {
-                    throw FtpProtocolException(passReply.code, "Login FTP recusado.")
-                }
+            expectedReplyStage = "banner FTP"
+            val banner = read()
+            if (banner.code == 421) {
+                throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
             }
-            421 -> throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
-            else -> throw FtpProtocolException(userReply.code, "Login FTP recusado.")
-        }
+            if (!banner.isPositive) {
+                throw FtpProtocolException(banner.code, "Servidor FTP recusou a conexão.")
+            }
 
-        val typeReply = command("TYPE I")
-        if (!typeReply.isPositive) {
-            throw FtpProtocolException(typeReply.code, "Servidor FTP não aceitou modo binário.")
+            send("USER $username", "resposta USER")
+            val userReply = read()
+            when (userReply.code) {
+                230 -> Unit
+                331 -> {
+                    send("PASS $password", "resposta PASS")
+                    val passReply = read()
+                    if (passReply.code == 421) {
+                        throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
+                    }
+                    if (passReply.code != 230) {
+                        throw FtpProtocolException(passReply.code, "Login FTP recusado.")
+                    }
+                }
+                421 -> throw FtpProtocolException(421, "Servidor FTP atingiu o limite de conexões.")
+                else -> throw FtpProtocolException(userReply.code, "Login FTP recusado.")
+            }
+
+            val typeReply = command("TYPE I")
+            if (!typeReply.isPositive) {
+                throw FtpProtocolException(typeReply.code, "Servidor FTP não aceitou modo binário.")
+            }
+        } catch (error: Throwable) {
+            // connectAndLogin can fail before a session object is returned to
+            // the repository. Close here so repeated diagnostics cannot leak
+            // control sockets or consume the Xbox FTP server's client slots.
+            runCatching { reader?.close() }
+            runCatching { writer?.close() }
+            runCatching { connected.close() }
+            reader = null
+            writer = null
+            socket = null
+            throw error
         }
     }
 
