@@ -27,14 +27,20 @@ fun filterLibraryGames(
     states: Map<String, PlayerGameState>,
     filter: LibraryFilter,
     query: String,
+    capabilityFilter: LibraryCapabilityFilter = LibraryCapabilityFilter.All,
+    genreFilter: String? = null,
+    metadata: Map<Long, GameCapabilityMetadata> = emptyMap(),
 ): List<GameEntry> {
     val normalizedQuery = query.trim()
+    val normalizedGenre = genreFilter?.trim()?.takeIf(String::isNotBlank)
     return games
         .asSequence()
         .filter { game ->
+            val gameMetadata = metadata[game.titleId]
             normalizedQuery.isBlank() ||
                 game.title.contains(normalizedQuery, ignoreCase = true) ||
-                game.titleIdHex.contains(normalizedQuery, ignoreCase = true)
+                game.titleIdHex.contains(normalizedQuery, ignoreCase = true) ||
+                gameMetadata?.normalizedGenre?.contains(normalizedQuery, ignoreCase = true) == true
         }
         .filter { game ->
             val state = states[game.stableKey] ?: PlayerGameState()
@@ -45,6 +51,20 @@ fun filterLibraryGames(
                 LibraryFilter.Backlog -> state.status == GameStatus.WantToPlay
                 LibraryFilter.Finished -> state.status == GameStatus.Finished
             }
+        }
+        .filter { game ->
+            val gameMetadata = metadata[game.titleId] ?: GameCapabilityMetadata()
+            when (capabilityFilter) {
+                LibraryCapabilityFilter.All -> true
+                LibraryCapabilityFilter.Kinect ->
+                    gameMetadata.kinect == KinectSupport.Supported ||
+                        gameMetadata.kinect == KinectSupport.Required
+                LibraryCapabilityFilter.LocalMultiplayer -> gameMetadata.hasLocalMultiplayer == true
+            }
+        }
+        .filter { game ->
+            normalizedGenre == null ||
+                metadata[game.titleId]?.normalizedGenre?.equals(normalizedGenre, ignoreCase = true) == true
         }
         .sortedWith(
             compareByDescending<GameEntry> { states[it.stableKey]?.lastPlayedAt ?: 0L }
