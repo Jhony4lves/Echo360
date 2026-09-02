@@ -52,6 +52,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.jhony4lves.echo360.data.library.ArtworkSyncProgress
+import com.jhony4lves.echo360.data.library.AuroraArtworkRepository
 import com.jhony4lves.echo360.data.library.AuroraGameLauncher
 import com.jhony4lves.echo360.data.library.AuroraLibraryRepository
 import com.jhony4lves.echo360.data.library.LibrarySyncProgress
@@ -73,6 +75,7 @@ import kotlinx.coroutines.launch
 fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { AuroraLibraryRepository(context) }
+    val artworkRepository = remember(context) { AuroraArtworkRepository(context) }
     val launcher = remember(context) { AuroraGameLauncher(context) }
     val playerStore = remember(context) { PlayerStateStore(context) }
     val scope = rememberCoroutineScope()
@@ -85,6 +88,9 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
     var selected by remember { mutableStateOf<GameEntry?>(null) }
     var syncing by remember { mutableStateOf(false) }
     var syncProgress by remember { mutableStateOf<LibrarySyncProgress?>(null) }
+    var artworkSyncing by remember { mutableStateOf(false) }
+    var artworkProgress by remember { mutableStateOf<ArtworkSyncProgress?>(null) }
+    var artworkRevision by remember { mutableStateOf(0) }
     var launchingKey by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
 
@@ -121,6 +127,24 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
                 message = it.message ?: "Falha ao sincronizar a biblioteca."
             }
             syncing = false
+        }
+    }
+
+    fun syncArtwork() {
+        val current = snapshot ?: return
+        artworkSyncing = true
+        artworkProgress = null
+        message = null
+        scope.launch {
+            runCatching {
+                artworkRepository.syncCovers(current) { progress -> artworkProgress = progress }
+            }.onSuccess { result ->
+                artworkRevision += 1
+                message = "Capas: ${result.downloaded} novas, ${result.cached} em cache, ${result.unavailable} ausentes, ${result.failed} falharam."
+            }.onFailure {
+                message = it.message ?: "Falha ao sincronizar as capas do Aurora."
+            }
+            artworkSyncing = false
         }
     }
 
@@ -239,6 +263,7 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
                     state = states[game.stableKey] ?: PlayerGameState(),
                     running = liveGame?.stableKey == game.stableKey,
                     launching = launchingKey == game.stableKey,
+                    artworkRevision = artworkRevision,
                     onClose = { selected = null },
                     onFavorite = {
                         playerStore.toggleFavorite(game)
@@ -276,7 +301,7 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
                     }
                     Button(
                         onClick = ::syncLibrary,
-                        enabled = !syncing,
+                        enabled = !syncing && !artworkSyncing,
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = EchoColors.NeonGreen,
@@ -296,7 +321,34 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
                         Spacer(Modifier.width(8.dp))
                         Text(if (snapshot == null) "SINCRONIZAR COM AURORA" else "ATUALIZAR CATÁLOGO")
                     }
+                    if (snapshot != null) {
+                        Button(
+                            onClick = ::syncArtwork,
+                            enabled = !syncing && !artworkSyncing,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EchoColors.SurfaceBright,
+                                contentColor = EchoColors.NeonGreen,
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            if (artworkSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = EchoColors.NeonGreen,
+                                )
+                            } else {
+                                Icon(Icons.Outlined.Refresh, null)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (artworkSyncing) "SINCRONIZANDO CAPAS" else "SINCRONIZAR CAPAS DO AURORA")
+                        }
+                    }
                     syncProgress?.message?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = EchoColors.TextSecondary)
+                    }
+                    artworkProgress?.message?.takeIf { it.isNotBlank() }?.let {
                         Text(it, style = MaterialTheme.typography.labelMedium, color = EchoColors.TextSecondary)
                     }
                 }
@@ -390,6 +442,7 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
                         game = game,
                         state = states[game.stableKey] ?: PlayerGameState(),
                         running = liveGame?.stableKey == game.stableKey,
+                        artworkRevision = artworkRevision,
                         onOpen = { selected = game },
                         onFavorite = {
                             playerStore.toggleFavorite(game)
@@ -407,6 +460,7 @@ private fun PlayerGameCard(
     game: GameEntry,
     state: PlayerGameState,
     running: Boolean,
+    artworkRevision: Int,
     onOpen: () -> Unit,
     onFavorite: () -> Unit,
 ) {
@@ -418,7 +472,7 @@ private fun PlayerGameCard(
                 .padding(13.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GameArt(game, 66)
+            CachedGameArt(game, 66, artworkRevision)
             Spacer(Modifier.width(13.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -467,6 +521,7 @@ private fun GameDetailPanel(
     state: PlayerGameState,
     running: Boolean,
     launching: Boolean,
+    artworkRevision: Int,
     onClose: () -> Unit,
     onFavorite: () -> Unit,
     onStatus: (GameStatus) -> Unit,
@@ -475,7 +530,7 @@ private fun GameDetailPanel(
     EchoPanel(modifier = Modifier.fillMaxWidth(), highlighted = true) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                GameArt(game, 84)
+                CachedGameArt(game, 84, artworkRevision)
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
@@ -565,34 +620,5 @@ private fun GameDetailPanel(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun GameArt(game: GameEntry, size: Int) {
-    val initials = game.title
-        .split(' ')
-        .filter { it.isNotBlank() }
-        .take(2)
-        .joinToString("") { it.first().uppercase() }
-        .ifBlank { "X" }
-
-    Box(
-        modifier = Modifier
-            .size(size.dp)
-            .background(
-                Brush.radialGradient(
-                    listOf(EchoColors.NeonGreen.copy(alpha = 0.30f), EchoColors.SurfaceHigh, EchoColors.Void),
-                ),
-                RoundedCornerShape(16.dp),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            initials,
-            style = MaterialTheme.typography.headlineMedium,
-            color = EchoColors.NeonGreen,
-            fontWeight = FontWeight.Black,
-        )
     }
 }
