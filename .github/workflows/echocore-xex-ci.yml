@@ -2,6 +2,12 @@ name: EchoCore XEX CI
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - echocore/prehardware-integration
+    paths:
+      - ".github/workflows/echocore-xex-ci.yml"
+      - "echocore/**"
   pull_request:
     paths:
       - ".github/workflows/echocore-xex-ci.yml"
@@ -17,43 +23,33 @@ permissions:
 env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
+  ECHO_TOOLCHAIN_CACHE_KEY: echocore-openxechain-fast-v3-j1
 
 jobs:
   core-host-tests:
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 6
 
     steps:
       - name: Checkout Echo360
         uses: actions/checkout@v5
 
-      - name: Compile EchoCore host tests
-        run: |
-          for source in \
-            echocore/tests/echo_protocol_test.c \
-            echocore/tests/echo_path_test.c \
-            echocore/tests/echo_transfer_state_test.c
-          do
-            name="$(basename "$source" .c)"
-            clang \
-              -std=c11 \
-              -Wall \
-              -Wextra \
-              -Werror \
-              -pedantic \
-              "$source" \
-              -o "/tmp/$name"
-          done
+      - name: Run complete EchoCore host suite
+        run: bash echocore/tests/run-host-tests.sh
 
-      - name: Run EchoCore host tests
+      - name: Verify physical pairing KDF vector
         run: |
-          /tmp/echo_protocol_test
-          /tmp/echo_path_test
-          /tmp/echo_transfer_state_test
+          python3 - <<'PY'
+          import hashlib
+          token = bytes(range(16))
+          expected = '7344e42de48a363d0454babae5d527f1bf0b43e319fd18da2062ebf524d050f4'
+          actual = hashlib.sha256(b'ECHO360-PAIRING-TOKEN-V1' + token).hexdigest()
+          assert actual == expected, (actual, expected)
+          PY
 
   toolchain:
     runs-on: ubuntu-22.04
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     steps:
       - name: Checkout Echo360
@@ -75,12 +71,12 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cmake" --version
 
-      - name: Restore minimal OpenXeChain cache
+      - name: Restore component-only OpenXeChain cache
         id: toolchain-cache
         uses: actions/cache@v4
         with:
           path: /tmp/openxechain-sysroot
-          key: echocore-openxechain-min-v2-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
+          key: ${{ env.ECHO_TOOLCHAIN_CACHE_KEY }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
 
       - name: Clone pinned OpenXeChain sources
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -94,12 +90,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$OPENXECHAIN_BUILD_SHA"
           git submodule status llvm xecorelib synthxex
 
-      - name: Build minimal OpenXeChain toolchain
+      - name: Build component-only OpenXeChain toolchain serially
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        env:
+          LLVM_PARALLEL: 1
         run: |
           set -o pipefail
           : > /tmp/echocore-toolchain-build.log
-          bash echocore/openxechain/build-minimal-toolchain.sh /tmp/openxechain \
+          bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain \
             2>&1 | tee /tmp/echocore-toolchain-build.log
 
       - name: Upload toolchain build log
@@ -111,7 +109,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Verify minimal toolchain
+      - name: Verify component-only toolchain
         run: |
           test -x "$OPENXECHAIN_SYSROOT/bin/clang"
           test -x "$OPENXECHAIN_SYSROOT/bin/lld-link"
@@ -122,33 +120,65 @@ jobs:
           "$OPENXECHAIN_SYSROOT/bin/clang" --version
           "$OPENXECHAIN_SYSROOT/bin/synthxex" --help || true
 
-  echocore:
+  echocore-bundle:
     needs:
       - core-host-tests
       - toolchain
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Echo360
         uses: actions/checkout@v5
 
-      - name: Restore proven minimal OpenXeChain toolchain
-        id: toolchain-cache
+      - name: Restore proven component-only OpenXeChain toolchain
         uses: actions/cache/restore@v4
         with:
           path: /tmp/openxechain-sysroot
-          key: echocore-openxechain-min-v2-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
+          key: ${{ env.ECHO_TOOLCHAIN_CACHE_KEY }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
           fail-on-cache-miss: true
 
-      - name: Build EchoCore XEX
-        run: |
-          bash echocore/openxechain/build-echo-core.sh
+      - name: Forge EchoCore hardware bootstrap
+        run: bash echocore/openxechain/build-echo-core.sh
 
-      - name: Upload EchoCore hardware bootstrap
+      - name: Forge EchoCore physical pairing XEX
+        run: bash echocore/openxechain/build-echo-core-pairing.sh
+
+      - name: Forge EchoCore plugin smoke XEX
+        run: bash echocore/openxechain/build-echo-core-plugin-smoke.sh
+
+      - name: Forge EchoCore resident SYS DLL XEX
+        run: bash echocore/openxechain/build-echo-core-resident.sh
+
+      - name: Verify complete pre-hardware bundle exists
+        run: |
+          set -euxo pipefail
+          test -s /tmp/echocore-build/EchoCore.xex
+          test -s /tmp/echocore-pairing-build/EchoCorePairing.xex
+          test -s /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
+          test -s /tmp/echocore-resident-build/EchoCoreResident.xex
+          python3 - <<'PY'
+          from pathlib import Path
+          files = [
+              Path('/tmp/echocore-build/EchoCore.xex'),
+              Path('/tmp/echocore-pairing-build/EchoCorePairing.xex'),
+              Path('/tmp/echocore-plugin-build/EchoCorePluginSmoke.xex'),
+              Path('/tmp/echocore-resident-build/EchoCoreResident.xex'),
+          ]
+          for path in files:
+              data = path.read_bytes()
+              assert data[:4] == b'XEX2', path
+              print(path.name, len(data), 'bytes', 'XEX2')
+          PY
+
+      - name: Upload complete EchoCore pre-hardware bundle
         uses: actions/upload-artifact@v4
         with:
-          name: EchoCore-XEX-${{ github.sha }}
-          path: /tmp/echocore-build/EchoCore.xex
+          name: EchoCore-Prehardware-XEX-${{ github.sha }}
+          path: |
+            /tmp/echocore-build/EchoCore.xex
+            /tmp/echocore-pairing-build/EchoCorePairing.xex
+            /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
+            /tmp/echocore-resident-build/EchoCoreResident.xex
           if-no-files-found: error
           retention-days: 30
