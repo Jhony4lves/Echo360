@@ -15,9 +15,9 @@ class EchoIntegrityAnalyzer {
         checkedAtEpochMs: Long = System.currentTimeMillis(),
     ): EchoIntegrityReport {
         val findings = buildList {
-            addAll(collectionFindings(snapshot))
+            addAll(collectionFindings(snapshot, selectedStableKey = game?.stableKey))
             val targets = if (game == null) snapshot.games else listOf(game)
-            targets.forEach { target -> addAll(gameFindings(snapshot, target)) }
+            targets.forEach { target -> addAll(gameFindings(target)) }
         }
             .distinctBy { finding ->
                 "${finding.source}:${finding.code}:${finding.gameStableKey}:${finding.evidence}"
@@ -34,7 +34,10 @@ class EchoIntegrityAnalyzer {
         )
     }
 
-    private fun collectionFindings(snapshot: LibrarySnapshot): List<IntegrityFinding> = buildList {
+    private fun collectionFindings(
+        snapshot: LibrarySnapshot,
+        selectedStableKey: String?,
+    ): List<IntegrityFinding> = buildList {
         if (snapshot.databaseBytes <= 0L) {
             add(
                 finding(
@@ -74,6 +77,7 @@ class EchoIntegrityAnalyzer {
         snapshot.games
             .groupBy(GameEntry::stableKey)
             .filterValues { it.size > 1 }
+            .filterKeys { stableKey -> selectedStableKey == null || stableKey == selectedStableKey }
             .forEach { (stableKey, duplicates) ->
                 add(
                     finding(
@@ -88,10 +92,7 @@ class EchoIntegrityAnalyzer {
             }
     }
 
-    private fun gameFindings(
-        snapshot: LibrarySnapshot,
-        game: GameEntry,
-    ): List<IntegrityFinding> = buildList {
+    private fun gameFindings(game: GameEntry): List<IntegrityFinding> = buildList {
         if (game.titleId == 0L) {
             add(
                 finding(
@@ -193,20 +194,6 @@ class EchoIntegrityAnalyzer {
                     title = "Path final do executável é inseguro",
                     evidence = "O path resolvido contém '..': $canonicalExecutable",
                     action = "Bloqueie operações neste registro e corrija o path de origem no Aurora.",
-                    gameStableKey = game.stableKey,
-                ),
-            )
-        }
-
-        val sameStableKey = snapshot.games.count { it.stableKey == game.stableKey }
-        if (sameStableKey > 1 && none { it.code == CODE_DUPLICATE_ENTRY && it.gameStableKey == game.stableKey }) {
-            add(
-                finding(
-                    code = CODE_DUPLICATE_ENTRY,
-                    severity = IntegritySeverity.Warning,
-                    title = "Entrada duplicada no catálogo",
-                    evidence = "$sameStableKey registros compartilham a chave ${game.stableKey}.",
-                    action = "Revise paths duplicados no Aurora antes de remover qualquer conteúdo.",
                     gameStableKey = game.stableKey,
                 ),
             )
