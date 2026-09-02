@@ -27,6 +27,12 @@ for source in echocore/tests/*_test.c; do
       echocore/openxechain/echo_transfer_writer_xbox.c \
       "${source}" \
       -o "${binary}"
+  elif [[ "${name}" == "echo_pairing_store_xbox_test" ]]; then
+    "${CC}" "${CFLAGS[@]}" \
+      -fno-pie -no-pie \
+      -Iechocore/tests/xbox_stubs \
+      "${source}" \
+      -o "${binary}"
   else
     "${CC}" "${CFLAGS[@]}" "${source}" -o "${binary}"
   fi
