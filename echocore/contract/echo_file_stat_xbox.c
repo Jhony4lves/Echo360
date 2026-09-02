@@ -8,26 +8,34 @@
 #include "echo_file_stat_xbox.h"
 #include "echo_path_policy.h"
 
-/* Present in Xbox 360 NTSTATUS tables but not yet named by pinned xecorelib. */
-#define ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND ((NTSTATUS)0xC000003AU)
-#define ECHO_NTSTATUS_NOT_A_DIRECTORY       ((NTSTATUS)0xC0000103U)
+/* Pinned xecorelib's STATUS_* macros use an undeclared STATUS typedef. */
+#define ECHO_NTSTATUS_NO_SUCH_FILE           ((NTSTATUS)0xC000000FU)
+#define ECHO_NTSTATUS_INVALID_PARAMETER      ((NTSTATUS)0xC000000DU)
+#define ECHO_NTSTATUS_NOT_IMPLEMENTED        ((NTSTATUS)0xC0000002U)
+#define ECHO_NTSTATUS_ACCESS_DENIED          ((NTSTATUS)0xC0000022U)
+#define ECHO_NTSTATUS_OBJECT_NAME_INVALID    ((NTSTATUS)0xC0000033U)
+#define ECHO_NTSTATUS_OBJECT_NAME_NOT_FOUND  ((NTSTATUS)0xC0000034U)
+#define ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND  ((NTSTATUS)0xC000003AU)
+#define ECHO_NTSTATUS_NOT_SUPPORTED          ((NTSTATUS)0xC00000BBU)
+#define ECHO_NTSTATUS_NOT_A_DIRECTORY        ((NTSTATUS)0xC0000103U)
+#define ECHO_NTSTATUS_NOT_FOUND              ((NTSTATUS)0xC0000225U)
 
 static uint8_t echo_stat_status_from_ntstatus(NTSTATUS status) {
     switch (status) {
-        case STATUS_NO_SUCH_FILE:
-        case STATUS_OBJECT_NAME_NOT_FOUND:
-        case STATUS_NOT_FOUND:
+        case ECHO_NTSTATUS_NO_SUCH_FILE:
+        case ECHO_NTSTATUS_OBJECT_NAME_NOT_FOUND:
+        case ECHO_NTSTATUS_NOT_FOUND:
         case ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND:
             return ECHO_STATUS_NOT_FOUND;
-        case STATUS_ACCESS_DENIED:
+        case ECHO_NTSTATUS_ACCESS_DENIED:
             return ECHO_STATUS_ACCESS_DENIED;
         case ECHO_NTSTATUS_NOT_A_DIRECTORY:
             return ECHO_STATUS_NOT_DIRECTORY;
-        case STATUS_OBJECT_NAME_INVALID:
-        case STATUS_INVALID_PARAMETER:
+        case ECHO_NTSTATUS_OBJECT_NAME_INVALID:
+        case ECHO_NTSTATUS_INVALID_PARAMETER:
             return ECHO_STATUS_INVALID_PATH;
-        case STATUS_NOT_SUPPORTED:
-        case STATUS_NOT_IMPLEMENTED:
+        case ECHO_NTSTATUS_NOT_SUPPORTED:
+        case ECHO_NTSTATUS_NOT_IMPLEMENTED:
             return ECHO_STATUS_UNSUPPORTED;
         default:
             return ECHO_STATUS_IO_ERROR;
