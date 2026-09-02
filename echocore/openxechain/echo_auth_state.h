@@ -44,7 +44,7 @@ typedef struct echo_auth_state {
  * volatile accesses prevent an optimizer from replacing the tiny loops with an
  * implicit memset/memcpy dependency that would defeat -nostdlib linkage.
  */
-static void echo_auth_zero_bytes(volatile uint8_t *bytes, size_t length) {
+static inline void echo_auth_zero_bytes(volatile uint8_t *bytes, size_t length) {
     size_t i;
     if (bytes == NULL) {
         return;
@@ -54,7 +54,7 @@ static void echo_auth_zero_bytes(volatile uint8_t *bytes, size_t length) {
     }
 }
 
-static void echo_auth_copy_bytes(
+static inline void echo_auth_copy_bytes(
     volatile uint8_t *dest,
     const volatile uint8_t *src,
     size_t length
@@ -68,7 +68,7 @@ static void echo_auth_copy_bytes(
     }
 }
 
-static void echo_auth_session_end(echo_auth_state *state) {
+static inline void echo_auth_session_end(echo_auth_state *state) {
     if (state == NULL) {
         return;
     }
@@ -81,7 +81,7 @@ static void echo_auth_session_end(echo_auth_state *state) {
     state->authenticated = 0U;
 }
 
-static int echo_auth_session_begin(
+static inline int echo_auth_session_begin(
     echo_auth_state *state,
     uint64_t session_id,
     const uint8_t challenge[ECHO_AUTH_CHALLENGE_BYTES]
@@ -124,7 +124,7 @@ static int echo_auth_session_begin(
  * older EchoCore from authenticating a capability it does not understand and
  * accidentally changing its meaning in a later protocol version.
  */
-static int echo_auth_mark_authenticated(
+static inline int echo_auth_mark_authenticated(
     echo_auth_state *state,
     uint64_t counter,
     uint64_t granted_capabilities
@@ -149,7 +149,7 @@ static int echo_auth_mark_authenticated(
  * A duplicate, lower value, zero, unauthenticated command, or wrap attempt is
  * rejected. The caller must verify the MAC before committing the counter.
  */
-static int echo_auth_commit_counter(echo_auth_state *state, uint64_t counter) {
+static inline int echo_auth_commit_counter(echo_auth_state *state, uint64_t counter) {
     if (state == NULL || state->authenticated == 0U ||
         counter == UINT64_C(0) || counter <= state->last_rx_counter) {
         return -1;
@@ -159,7 +159,7 @@ static int echo_auth_commit_counter(echo_auth_state *state, uint64_t counter) {
     return 0;
 }
 
-static int echo_auth_has_capability(const echo_auth_state *state, uint64_t capability) {
+static inline int echo_auth_has_capability(const echo_auth_state *state, uint64_t capability) {
     if (state == NULL || capability == UINT64_C(0) ||
         (capability & ~ECHO_CAP_ALL) != UINT64_C(0)) {
         return 0;
