@@ -7,6 +7,7 @@ BUILD_TYPE="${BUILD_TYPE:-Release}"
 PARALLEL="${PARALLEL:-$(nproc)}"
 HOST_CC="${HOST_CC:-clang}"
 HOST_CXX="${HOST_CXX:-clang++}"
+XBOX_TARGET="${XBOX_TARGET:-ppc32-unknown-xbox360}"
 
 LLVM_BUILD="${ROOT}/build-llvm-fast"
 XECORE_BUILD="${ROOT}/build-xecorelib-fast"
@@ -19,12 +20,10 @@ for required in "${ROOT}/llvm/llvm" "${ROOT}/xecorelib" "${ROOT}/synthxex"; do
   fi
 done
 
-# Only parent components with real install targets belong in an LLVM
-# distribution. lld-link is installed as a symlink of lld. llvm-dlltool is
-# implemented by llvm-ar and normally installed as an alias, but that alias is
-# not materialized by install-distribution when only the parent llvm-ar
-# component is selected. Keep llvm-ar as the distribution component and create
-# the canonical argv[0]-dispatch alias explicitly after installation.
+# The OpenXeChain fork models xbox360 as an OS in llvm::Triple. A two-component
+# spelling such as ppc32-xbox360 is normalized as arch+vendor and silently loses
+# the Xbox OS, producing powerpc-unknown-none. Keep an explicit unknown vendor
+# so Clang selects CrossXbox360ToolChain for every invocation.
 LLVM_COMPONENTS="clang;clang-resource-headers;lld;llvm-ar"
 
 rm -rf "${LLVM_BUILD}" "${XECORE_BUILD}" "${SYNTH_BUILD}"
@@ -39,29 +38,23 @@ cmake \
   -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
   -DLLVM_ENABLE_PROJECTS="lld;clang" \
   -DLLVM_TARGETS_TO_BUILD=PowerPC \
-  -DLLVM_DEFAULT_TARGET_TRIPLE=ppc32-xbox360 \
+  -DLLVM_DEFAULT_TARGET_TRIPLE="${XBOX_TARGET}" \
   -DLLVM_INSTALL_BINUTILS_SYMLINKS=true \
   -DLLVM_INSTALL_CCTOOLS_SYMLINKS=true \
   -DLLVM_INSTALL_TOOLCHAIN_ONLY=true \
   -DLLVM_DISTRIBUTION_COMPONENTS="${LLVM_COMPONENTS}" \
   -G Ninja
 
-# Building the distribution target avoids building/installing every LLVM tool
-# pulled into the default ALL target. Dependencies of the selected tools are
-# still built normally, so this is an optimization, not a binary hack/copy.
 cmake --build "${LLVM_BUILD}" --target distribution --parallel "${PARALLEL}"
 cmake --build "${LLVM_BUILD}" --target install-distribution --parallel "${PARALLEL}"
 
 # llvm-dlltool and llvm-ar are the same multiplexer binary selected by argv[0].
-# The normal full LLVM install creates this symlink for us. The restricted
-# distribution install above installs llvm-ar but omits the alias, so recreate
-# exactly that upstream relationship instead of compiling a second tool.
+# install-distribution installs llvm-ar but omits the alias when only the parent
+# component is selected, so recreate the canonical relationship explicitly.
 if [[ ! -e "${PREFIX}/bin/llvm-dlltool" ]]; then
   ln -s llvm-ar "${PREFIX}/bin/llvm-dlltool"
 fi
 
-# Parent installs must have materialized every executable EchoCore/xecorelib
-# needs. Fail here, before xecorelib, if LLVM's install semantics change again.
 for binary in clang lld lld-link llvm-ar llvm-dlltool; do
   if [[ ! -x "${PREFIX}/bin/${binary}" ]]; then
     echo "EchoCore fast toolchain: expected LLVM tool missing: ${binary}" >&2
@@ -69,22 +62,36 @@ for binary in clang lld lld-link llvm-ar llvm-dlltool; do
   fi
 done
 
-cat > "${PREFIX}/bin/clang.cfg" <<'EOF'
+cat > "${PREFIX}/bin/clang.cfg" <<EOF
+--target=${XBOX_TARGET}
 -Wno-main-return-type
 --sysroot=<CFGDIR>/..
 -fdeclspec
 -mlongcall
 EOF
 
-cat > "${PREFIX}/bin/clang++.cfg" <<'EOF'
+cat > "${PREFIX}/bin/clang++.cfg" <<EOF
+--target=${XBOX_TARGET}
 -Wno-main-return-type
 --sysroot=<CFGDIR>/..
 -fdeclspec
 -mlongcall
 EOF
 
-# Prove the installed driver can assemble a PowerPC/Xbox .s file using its
-# integrated assembler before invoking xecorelib's install script.
+# Prove the installed driver is not silently targeting generic PowerPC before
+# xecorelib gets a chance to compile hv.s. -### prints the effective cc1 triple.
+EFFECTIVE_DRIVER="$(${PREFIX}/bin/clang -### -c -x c /dev/null 2>&1 || true)"
+case "${EFFECTIVE_DRIVER}" in
+  *powerpc-unknown-xbox360*|*ppc32-unknown-xbox360*) ;;
+  *)
+    echo "EchoCore fast toolchain: Clang did not select the Xbox 360 target" >&2
+    printf '%s\n' "${EFFECTIVE_DRIVER}" >&2
+    exit 4
+    ;;
+esac
+
+# Prove the installed driver can assemble a PowerPC/Xbox .s file using the same
+# config xecorelib/install.sh will inherit for hv.s.
 cat > "${LLVM_BUILD}/echocore-asm-smoke.s" <<'EOF'
     .text
     .globl echo_asm_smoke
@@ -97,7 +104,6 @@ EOF
   -o "${LLVM_BUILD}/echocore-asm-smoke.o"
 test -s "${LLVM_BUILD}/echocore-asm-smoke.o"
 
-# Prove the alias dispatches to llvm-dlltool before asking xecorelib to use it.
 "${PREFIX}/bin/llvm-dlltool" --version >/dev/null
 
 (
