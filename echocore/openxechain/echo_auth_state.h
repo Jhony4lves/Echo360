@@ -8,17 +8,24 @@
 #define ECHO_AUTH_SECRET_BYTES 32U
 #define ECHO_AUTH_HMAC_SHA1_BYTES 20U
 
-#define ECHO_CAP_PING             (UINT64_C(1) << 0)
-#define ECHO_CAP_READ_INFO        (UINT64_C(1) << 1)
-#define ECHO_CAP_READ_FILESYSTEM  (UINT64_C(1) << 2)
-#define ECHO_CAP_WRITE_FILESYSTEM (UINT64_C(1) << 3)
-#define ECHO_CAP_LAUNCH           (UINT64_C(1) << 4)
-#define ECHO_CAP_SYSTEM_CONTROL   (UINT64_C(1) << 5)
-#define ECHO_CAP_PATCH            (UINT64_C(1) << 6)
-#define ECHO_CAP_ALL ( \
-    ECHO_CAP_PING | ECHO_CAP_READ_INFO | ECHO_CAP_READ_FILESYSTEM | \
-    ECHO_CAP_WRITE_FILESYSTEM | ECHO_CAP_LAUNCH | ECHO_CAP_SYSTEM_CONTROL | \
-    ECHO_CAP_PATCH \
+/*
+ * Security-policy capabilities are intentionally namespaced separately from
+ * the public EchoCore feature/capability bits in echo_readonly_contract.h.
+ * The two spaces answer different questions and MUST never be interchanged:
+ *   ECHO_AUTH_CAP_* = what an authenticated peer is allowed to do
+ *   ECHO_CAP_*      = what this EchoCore build reports that it implements
+ */
+#define ECHO_AUTH_CAP_PING             (UINT64_C(1) << 0)
+#define ECHO_AUTH_CAP_READ_INFO        (UINT64_C(1) << 1)
+#define ECHO_AUTH_CAP_READ_FILESYSTEM  (UINT64_C(1) << 2)
+#define ECHO_AUTH_CAP_WRITE_FILESYSTEM (UINT64_C(1) << 3)
+#define ECHO_AUTH_CAP_LAUNCH           (UINT64_C(1) << 4)
+#define ECHO_AUTH_CAP_SYSTEM_CONTROL   (UINT64_C(1) << 5)
+#define ECHO_AUTH_CAP_PATCH            (UINT64_C(1) << 6)
+#define ECHO_AUTH_CAP_ALL ( \
+    ECHO_AUTH_CAP_PING | ECHO_AUTH_CAP_READ_INFO | ECHO_AUTH_CAP_READ_FILESYSTEM | \
+    ECHO_AUTH_CAP_WRITE_FILESYSTEM | ECHO_AUTH_CAP_LAUNCH | ECHO_AUTH_CAP_SYSTEM_CONTROL | \
+    ECHO_AUTH_CAP_PATCH \
 )
 
 /*
@@ -75,7 +82,7 @@ static inline void echo_auth_session_end(echo_auth_state *state) {
 
     state->session_id = UINT64_C(0);
     state->last_rx_counter = UINT64_C(0);
-    state->capabilities = ECHO_CAP_PING;
+    state->capabilities = ECHO_AUTH_CAP_PING;
     echo_auth_zero_bytes(state->challenge, ECHO_AUTH_CHALLENGE_BYTES);
     state->challenge_active = 0U;
     state->authenticated = 0U;
@@ -132,12 +139,12 @@ static inline int echo_auth_mark_authenticated(
     if (state == NULL || state->session_id == UINT64_C(0) ||
         state->challenge_active == 0U || state->authenticated != 0U ||
         counter == UINT64_C(0) ||
-        (granted_capabilities & ~ECHO_CAP_ALL) != UINT64_C(0)) {
+        (granted_capabilities & ~ECHO_AUTH_CAP_ALL) != UINT64_C(0)) {
         return -1;
     }
 
     state->last_rx_counter = counter;
-    state->capabilities = granted_capabilities | ECHO_CAP_PING;
+    state->capabilities = granted_capabilities | ECHO_AUTH_CAP_PING;
     echo_auth_zero_bytes(state->challenge, ECHO_AUTH_CHALLENGE_BYTES);
     state->challenge_active = 0U;
     state->authenticated = 1U;
@@ -161,11 +168,11 @@ static inline int echo_auth_commit_counter(echo_auth_state *state, uint64_t coun
 
 static inline int echo_auth_has_capability(const echo_auth_state *state, uint64_t capability) {
     if (state == NULL || capability == UINT64_C(0) ||
-        (capability & ~ECHO_CAP_ALL) != UINT64_C(0)) {
+        (capability & ~ECHO_AUTH_CAP_ALL) != UINT64_C(0)) {
         return 0;
     }
 
-    if (capability == ECHO_CAP_PING) {
+    if (capability == ECHO_AUTH_CAP_PING) {
         return 1;
     }
 
