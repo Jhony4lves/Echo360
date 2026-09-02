@@ -15,6 +15,28 @@ env:
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
 
 jobs:
+  protocol-host:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Compile strict EchoLink parser tests
+        run: |
+          clang \
+            -std=c11 \
+            -Wall \
+            -Wextra \
+            -Werror \
+            -pedantic \
+            echocore/tests/echo_protocol_test.c \
+            -o /tmp/echo_protocol_test
+
+      - name: Run strict EchoLink parser tests
+        run: /tmp/echo_protocol_test
+
   toolchain:
     runs-on: ubuntu-22.04
     timeout-minutes: 150
@@ -87,7 +109,9 @@ jobs:
           "$OPENXECHAIN_SYSROOT/bin/synthxex" --help || true
 
   echocore:
-    needs: toolchain
+    needs:
+      - protocol-host
+      - toolchain
     runs-on: ubuntu-22.04
     timeout-minutes: 15
 
