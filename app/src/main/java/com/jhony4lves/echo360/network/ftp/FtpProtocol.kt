@@ -50,6 +50,12 @@ internal class FtpStageTimeoutException(
     cause: SocketTimeoutException,
 ) : IOException("Timeout em $stage.", cause)
 
+internal class FtpControlConnectException(
+    val host: String,
+    val port: Int,
+    cause: IOException,
+) : IOException("Falha ao conectar ao FTP de controle em $host:$port (${cause.message ?: cause::class.java.simpleName}).", cause)
+
 internal class FtpCommandChannel(
     private val host: String,
     private val port: Int,
@@ -77,7 +83,9 @@ internal class FtpCommandChannel(
             try {
                 connect(InetSocketAddress(host, port), timeoutMs)
             } catch (error: SocketTimeoutException) {
-                throw FtpStageTimeoutException("conexão TCP de controle", error)
+                throw FtpStageTimeoutException("conexão TCP de controle em $host:$port", error)
+            } catch (error: IOException) {
+                throw FtpControlConnectException(host, port, error)
             }
         }
         socket = connected
