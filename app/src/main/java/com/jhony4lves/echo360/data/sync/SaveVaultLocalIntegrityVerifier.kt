@@ -10,6 +10,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
+import java.nio.file.Files
 import java.security.MessageDigest
 import kotlin.coroutines.coroutineContext
 
@@ -33,7 +34,10 @@ class SaveVaultLocalIntegrityVerifier(
         cancellationToken: TransferCancellationToken = TransferCancellationToken(),
         onProgress: (SaveVaultIntegrityProgress) -> Unit = {},
     ): SaveVaultIntegrityReport = withContext(Dispatchers.IO) {
-        val payloadRoot = File(snapshot.directory, "payload").canonicalFile
+        rejectSymbolicLink(snapshot.directory, "diretório do snapshot")
+        val rawPayloadRoot = File(snapshot.directory, "payload")
+        rejectSymbolicLink(rawPayloadRoot, "raiz payload")
+        val payloadRoot = rawPayloadRoot.canonicalFile
         val actualFiles = if (payloadRoot.isDirectory) {
             enumerateFiles(payloadRoot, cancellationToken)
         } else {
@@ -95,6 +99,7 @@ class SaveVaultLocalIntegrityVerifier(
 
         fun walk(directory: File) {
             if (cancellationToken.isCancelled()) throw SaveVaultIntegrityCancelledException()
+            rejectSymbolicLink(directory, "diretório do payload")
             val canonicalDirectory = directory.canonicalFile
             requireContained(payloadRoot, canonicalDirectory)
             if (!seenDirectories.add(canonicalDirectory.path)) return
@@ -111,6 +116,7 @@ class SaveVaultLocalIntegrityVerifier(
                 .forEach { child ->
                     if (cancellationToken.isCancelled()) throw SaveVaultIntegrityCancelledException()
                     SaveVaultPathPolicy.validateSegment(child.name)
+                    rejectSymbolicLink(child, "entrada ${child.name}")
                     val canonicalChild = child.canonicalFile
                     requireContained(payloadRoot, canonicalChild)
                     val relative = canonicalChild.relativeTo(payloadRoot).path
@@ -137,9 +143,25 @@ class SaveVaultLocalIntegrityVerifier(
 
     private fun resolvePayloadPath(payloadRoot: File, relativePath: String): File {
         val relative = SaveVaultPathPolicy.validateRelativePath(relativePath)
-        val candidate = File(payloadRoot, relative).canonicalFile
-        requireContained(payloadRoot, candidate)
-        return candidate
+        val candidate = File(payloadRoot, relative)
+        rejectPathSymlinks(payloadRoot, candidate)
+        val canonical = candidate.canonicalFile
+        requireContained(payloadRoot, canonical)
+        return canonical
+    }
+
+    private fun rejectPathSymlinks(payloadRoot: File, candidate: File) {
+        var cursor: File? = candidate
+        while (cursor != null && cursor.path != payloadRoot.path) {
+            rejectSymbolicLink(cursor, "path ${cursor.name}")
+            cursor = cursor.parentFile
+        }
+    }
+
+    private fun rejectSymbolicLink(file: File, label: String) {
+        if (Files.isSymbolicLink(file.toPath())) {
+            throw IllegalStateException("Link simbólico não é permitido no Vault ($label).")
+        }
     }
 
     private fun requireContained(payloadRoot: File, candidate: File) {
