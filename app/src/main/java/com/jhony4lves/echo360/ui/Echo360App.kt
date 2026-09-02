@@ -37,6 +37,7 @@ private enum class EchoDestination(
 @Composable
 fun Echo360App() {
     EchoTheme {
+        EchoPlaytimeMonitor()
         var destination by remember { mutableStateOf(EchoDestination.Home) }
 
         EchoBackdrop {
