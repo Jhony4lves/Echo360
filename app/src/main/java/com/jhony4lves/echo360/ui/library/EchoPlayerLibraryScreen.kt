@@ -69,7 +69,9 @@ import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.components.EchoPanel
 import com.jhony4lves.echo360.ui.components.EchoStatusPill
 import com.jhony4lves.echo360.ui.theme.EchoColors
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.io.File
 
 @Composable
 fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
@@ -91,6 +93,11 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
     var artworkSyncing by remember { mutableStateOf(false) }
     var artworkProgress by remember { mutableStateOf<ArtworkSyncProgress?>(null) }
     var artworkRevision by remember { mutableStateOf(0) }
+    var detailBackgroundFile by remember { mutableStateOf<File?>(null) }
+    var detailBackgroundLoading by remember { mutableStateOf(false) }
+    var detailBackgroundMessage by remember { mutableStateOf<String?>(null) }
+    var detailBackgroundRevision by remember { mutableStateOf(0) }
+    var detailBackgroundRequestRevision by remember { mutableStateOf(0) }
     var launchingKey by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
 
@@ -168,6 +175,44 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
         snapshot = repository.loadCached()
         states = playerStore.snapshot(snapshot?.games.orEmpty())
         refreshNowPlaying()
+    }
+
+    LaunchedEffect(
+        selected?.stableKey,
+        snapshot?.databaseRemotePath,
+        detailBackgroundRequestRevision,
+    ) {
+        val game = selected
+        val current = snapshot
+        if (game == null || current == null) {
+            detailBackgroundFile = null
+            detailBackgroundLoading = false
+            detailBackgroundMessage = null
+            return@LaunchedEffect
+        }
+
+        detailBackgroundFile = artworkRepository.cachedBackground(game)
+        detailBackgroundLoading = true
+        detailBackgroundMessage = if (detailBackgroundFile != null) {
+            "Cache local carregado; verificando o Aurora."
+        } else {
+            "Buscando background no Aurora."
+        }
+
+        try {
+            val result = artworkRepository.fetchBackground(current, game)
+            result.file?.let { file ->
+                detailBackgroundFile = file
+                detailBackgroundRevision += 1
+            }
+            detailBackgroundMessage = result.message
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            detailBackgroundMessage = error.message ?: "Não foi possível carregar o background do Aurora."
+        } finally {
+            detailBackgroundLoading = false
+        }
     }
 
     val games = snapshot?.games.orEmpty()
@@ -264,6 +309,11 @@ fun EchoPlayerLibraryScreen(modifier: Modifier = Modifier) {
                     running = liveGame?.stableKey == game.stableKey,
                     launching = launchingKey == game.stableKey,
                     artworkRevision = artworkRevision,
+                    backgroundFile = detailBackgroundFile,
+                    backgroundLoading = detailBackgroundLoading,
+                    backgroundMessage = detailBackgroundMessage,
+                    backgroundRevision = detailBackgroundRevision,
+                    onRetryBackground = { detailBackgroundRequestRevision += 1 },
                     onClose = { selected = null },
                     onFavorite = {
                         playerStore.toggleFavorite(game)
@@ -522,6 +572,11 @@ private fun GameDetailPanel(
     running: Boolean,
     launching: Boolean,
     artworkRevision: Int,
+    backgroundFile: File?,
+    backgroundLoading: Boolean,
+    backgroundMessage: String?,
+    backgroundRevision: Int,
+    onRetryBackground: () -> Unit,
     onClose: () -> Unit,
     onFavorite: () -> Unit,
     onStatus: (GameStatus) -> Unit,
@@ -529,6 +584,15 @@ private fun GameDetailPanel(
 ) {
     EchoPanel(modifier = Modifier.fillMaxWidth(), highlighted = true) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            GameDetailBackgroundHero(
+                game = game,
+                backgroundFile = backgroundFile,
+                loading = backgroundLoading,
+                message = backgroundMessage,
+                revision = backgroundRevision,
+                onRetry = onRetryBackground,
+            )
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CachedGameArt(game, 84, artworkRevision)
                 Spacer(Modifier.width(14.dp))
