@@ -33,12 +33,24 @@ jobs:
           bash -n echocore/openxechain/build-minimal-toolchain-fast.sh
           bash -n echocore/openxechain/build-minimal-toolchain.sh
           bash -n echocore/openxechain/build-echo-core.sh
+          bash -n echocore/openxechain/build-echo-core-pairing.sh
           bash -n echocore/openxechain/build-echo-core-plugin-smoke.sh
           bash -n echocore/openxechain/build-echo-core-resident.sh
           bash -n echocore/tests/run-host-tests.sh
 
       - name: Run protocol auth path transfer-state and writer behavior tests
         run: bash echocore/tests/run-host-tests.sh
+
+      - name: Verify cross-platform physical pairing KDF vector
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          token = bytes(range(16))
+          expected = '7344e42de48a363d0454babae5d527f1bf0b43e319fd18da2062ebf524d050f4'
+          actual = hashlib.sha256(b'ECHO360-PAIRING-TOKEN-V1' + token).hexdigest()
+          assert actual == expected, (actual, expected)
+          print('EchoCore pairing KDF vector: OK')
+          PY
 
       - name: Compile pure read-only contract tests
         run: |
@@ -63,6 +75,7 @@ jobs:
           set -euxo pipefail
           CFLAGS='-std=c11 -Wall -Wextra -Werror -pedantic -ffreestanding -fno-builtin'
           clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_pairing_xex.c
           clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core_plugin_smoke.c
           clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core_resident.c
 
@@ -83,3 +96,4 @@ jobs:
           clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_net_server_xbox.c
           clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_transfer_writer_xbox.c
           clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_pairing_store_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_pairing_token_xbox.c
