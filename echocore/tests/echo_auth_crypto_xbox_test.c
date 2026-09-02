@@ -71,7 +71,7 @@ static void test_transcript_is_canonical_big_endian(void) {
     };
     static const uint8_t session_be[8] = {1U,2U,3U,4U,5U,6U,7U,8U};
     static const uint8_t counter_be[8] = {0x11U,0x12U,0x13U,0x14U,0x15U,0x16U,0x17U,0x18U};
-    uint64_t caps = ECHO_CAP_READ_INFO | ECHO_CAP_READ_FILESYSTEM;
+    uint64_t caps = ECHO_AUTH_CAP_READ_INFO | ECHO_AUTH_CAP_READ_FILESYSTEM;
 
     for (i = 0U; i < ECHO_AUTH_CHALLENGE_BYTES; ++i) challenge[i] = (uint8_t)(0x20U + i);
     assert(echo_auth_make_response_transcript(
@@ -132,7 +132,7 @@ static void test_valid_mac_authenticates_and_scrubs_challenge(void) {
     uint8_t secret[ECHO_AUTH_SECRET_BYTES];
     uint8_t mac[ECHO_AUTH_HMAC_SHA1_BYTES];
     uint8_t zero[ECHO_AUTH_CHALLENGE_BYTES] = {0};
-    uint64_t caps = ECHO_CAP_READ_INFO | ECHO_CAP_READ_FILESYSTEM;
+    uint64_t caps = ECHO_AUTH_CAP_READ_INFO | ECHO_AUTH_CAP_READ_FILESYSTEM;
 
     reset_random();
     make_fixed_secret(secret);
@@ -144,7 +144,7 @@ static void test_valid_mac_authenticates_and_scrubs_challenge(void) {
     assert(state.challenge_active == 0U);
     assert(state.last_rx_counter == 1U);
     assert((state.capabilities & caps) == caps);
-    assert((state.capabilities & ECHO_CAP_PING) != 0U);
+    assert((state.capabilities & ECHO_AUTH_CAP_PING) != 0U);
     assert(memcmp(state.challenge, zero, sizeof(zero)) == 0);
 }
 
@@ -153,7 +153,7 @@ static void test_tampered_mac_fails_without_consuming_challenge(void) {
     uint8_t secret[ECHO_AUTH_SECRET_BYTES];
     uint8_t mac[ECHO_AUTH_HMAC_SHA1_BYTES];
     uint8_t challenge_before[ECHO_AUTH_CHALLENGE_BYTES];
-    uint64_t caps = ECHO_CAP_READ_INFO;
+    uint64_t caps = ECHO_AUTH_CAP_READ_INFO;
 
     reset_random();
     make_fixed_secret(secret);
