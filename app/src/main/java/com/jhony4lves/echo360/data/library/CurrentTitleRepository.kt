@@ -27,7 +27,7 @@ internal class NovaCurrentTitleSource(
         novaClient.nowPlaying(profile).toCurrentTitleObservation()
 }
 
-class CurrentTitleRepository(
+internal class CurrentTitleRepository(
     context: Context,
     private val source: CurrentTitleSource = NovaCurrentTitleSource(),
 ) {
