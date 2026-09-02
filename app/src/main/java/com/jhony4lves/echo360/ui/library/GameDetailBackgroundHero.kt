@@ -19,11 +19,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -32,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.theme.EchoColors
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
@@ -43,15 +47,22 @@ internal fun GameDetailBackgroundHero(
     revision: Int,
     onRetry: () -> Unit,
 ) {
-    val bitmap = remember(
+    val fileModifiedAt = backgroundFile?.lastModified()
+    val bitmap by produceState<ImageBitmap?>(
+        initialValue = null,
         game.stableKey,
         revision,
         backgroundFile?.absolutePath,
-        backgroundFile?.lastModified(),
+        fileModifiedAt,
     ) {
-        backgroundFile
-            ?.takeIf { it.isFile && it.length() > 0L }
-            ?.let { file -> runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull() }
+        value = withContext(Dispatchers.IO) {
+            backgroundFile
+                ?.takeIf { it.isFile && it.length() > 0L }
+                ?.let { file ->
+                    runCatching { BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() }
+                        .getOrNull()
+                }
+        }
     }
     val shape = RoundedCornerShape(16.dp)
 
@@ -72,7 +83,7 @@ internal fun GameDetailBackgroundHero(
     ) {
         if (bitmap != null) {
             Image(
-                bitmap = bitmap.asImageBitmap(),
+                bitmap = requireNotNull(bitmap),
                 contentDescription = "Background de ${game.title}",
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
