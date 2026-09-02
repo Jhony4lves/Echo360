@@ -55,14 +55,15 @@ for source in "${SOURCES[@]}"; do
   stem="${stem%.c}"
   obj="${OUT_DIR}/obj/${stem}.obj"
   echo "[EchoCore resident] compile ${source}"
-  # Do not use -ffunction-sections/-fdata-sections with the pinned
-  # OpenXeChain PowerPC/COFF backend: its one_only COMDAT emission leaves
-  # definition symbols undefined in the object table.
+  # The Xbox driver does not add the installed sysroot headers implicitly.
+  # Also keep function/data sections disabled: the pinned PowerPC/COFF backend
+  # emits broken one_only COMDAT definition symbols for those options.
   "${CLANG}" \
     -std=c11 \
     -Os \
     -ffreestanding \
     -fno-builtin \
+    -I"${SYSROOT}/include" \
     -Wall \
     -Wextra \
     -Werror \
