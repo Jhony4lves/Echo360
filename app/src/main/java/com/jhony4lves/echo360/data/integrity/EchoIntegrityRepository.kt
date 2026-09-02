@@ -58,7 +58,8 @@ class EchoIntegrityRepository(
         }
 
         try {
-            val result = remoteProbe.verify(routed.session, game)
+            val filesystem = FtpReadOnlyFilesystem(routed.session)
+            val result = remoteProbe.verify(filesystem, game)
             baseline.mergeRemote(
                 remoteFindings = result.findings,
                 verified = result.verified,
