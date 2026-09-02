@@ -11,13 +11,13 @@ data class TitleUpdateCandidate(
     val location: TitleUpdateLocation,
     val remotePath: String,
     val fileName: String,
-    val sizeBytes: Long,
+    val sizeBytes: Long?,
     val titleIdHex: String? = null,
 ) {
     init {
         require(remotePath.startsWith('/')) { "TU remotePath precisa ser canônico." }
         require(fileName.isNotBlank()) { "TU fileName não pode ser vazio." }
-        require(sizeBytes >= 0L) { "TU sizeBytes inválido." }
+        sizeBytes?.let { require(it >= 0L) { "TU sizeBytes inválido." } }
         titleIdHex?.let {
             require(it.matches(Regex("^[0-9A-F]{8}$"))) { "Title ID da TU inválido." }
         }
