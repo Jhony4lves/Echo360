@@ -144,7 +144,9 @@ internal fun DashLaunchDoctorSection() {
                             color = EchoColors.TextSecondary,
                         )
                     } else {
-                        configured.forEach(::PluginRow)
+                        configured.forEach { plugin ->
+                            PluginRow(plugin)
+                        }
                     }
                 }
             }
@@ -160,7 +162,9 @@ internal fun DashLaunchDoctorSection() {
                 }
             } else {
                 EchoEyebrow("FINDINGS // ${current.findings.size}")
-                current.findings.forEach(::DoctorFindingCard)
+                current.findings.forEach { finding ->
+                    DoctorFindingCard(finding)
+                }
             }
         }
 
