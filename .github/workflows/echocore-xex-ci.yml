@@ -7,6 +7,10 @@ on:
       - ".github/workflows/echocore-xex-ci.yml"
       - "echocore/**"
 
+concurrency:
+  group: echocore-xex-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
