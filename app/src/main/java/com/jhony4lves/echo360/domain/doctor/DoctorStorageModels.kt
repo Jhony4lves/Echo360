@@ -7,6 +7,7 @@ enum class DoctorStorageOrigin {
     AuroraFtpCompatibility,
     FtpDllCompatibility,
     EchoCore,
+    Unavailable,
 }
 
 enum class DoctorStorageObjectType {
