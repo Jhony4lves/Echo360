@@ -80,6 +80,7 @@ fun XboxSystemScreen(
     val initial = remember { store.load() ?: XboxProfile() }
 
     var host by remember { mutableStateOf(initial.endpoint.host) }
+    var echoLinkPort by remember { mutableStateOf(initial.endpoint.echoLinkPort.toString()) }
     var novaPort by remember { mutableStateOf(initial.endpoint.novaPort.toString()) }
     var auroraPort by remember { mutableStateOf(initial.endpoint.auroraFtpPort.toString()) }
     var ftpDllPort by remember { mutableStateOf(initial.endpoint.ftpDllPort.toString()) }
@@ -103,6 +104,7 @@ fun XboxSystemScreen(
         XboxProfile(
             endpoint = XboxEndpoint(
                 host = host,
+                echoLinkPort = echoLinkPort.toInt(),
                 novaPort = novaPort.toInt(),
                 auroraFtpPort = auroraPort.toInt(),
                 ftpDllPort = ftpDllPort.toInt(),
@@ -217,7 +219,13 @@ fun XboxSystemScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        PortField("EchoCore", echoLinkPort, { echoLinkPort = it }, Modifier.weight(1f))
                         PortField("NOVA", novaPort, { novaPort = it }, Modifier.weight(1f))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         PortField("Aurora", auroraPort, { auroraPort = it }, Modifier.weight(1f))
                         PortField("FTPdll", ftpDllPort, { ftpDllPort = it }, Modifier.weight(1f))
                     }
@@ -339,6 +347,7 @@ fun XboxSystemScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     EchoEyebrow(if (result.consoleReachable) "CONSOLE ONLINE" else "CONSOLE STATUS")
+                    TransportCard(result.echoCore)
                     TransportCard(result.nova)
                     TransportCard(result.auroraFtp)
                     TransportCard(result.ftpDll)
@@ -371,7 +380,7 @@ private fun ConsoleHeader() {
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Conexão local do Echo360 com credenciais protegidas pelo Android Keystore.",
+            text = "EchoCore primeiro, NOVA/FTP como compatibilidade. Credenciais continuam protegidas pelo Android Keystore.",
             style = MaterialTheme.typography.bodyLarge,
             color = EchoColors.TextSecondary,
         )
@@ -515,7 +524,7 @@ private fun SecurityInfoPanel() {
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = "As três conexões compartilham a mesma camada segura do Echo360.",
+                text = "EchoCore usa apenas PING/PONG no bootstrap atual. Pairing/auth e comandos privilegiados só entram quando o contrato Xbox-side estiver fechado.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
@@ -588,6 +597,7 @@ private fun EchoTextField(
 @Composable
 private fun TransportCard(health: TransportHealth) {
     val title = when (health.transport) {
+        XboxTransport.EchoCore -> "ECHOCORE"
         XboxTransport.Nova -> "NOVA"
         XboxTransport.AuroraFtp -> "AURORA FTP"
         XboxTransport.FtpDll -> "FTPDLL"
