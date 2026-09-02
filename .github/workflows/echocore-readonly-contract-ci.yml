@@ -44,16 +44,18 @@ jobs:
           /tmp/echo-doctor-telemetry-test
           /tmp/echo-runtime-info-test
 
-      - name: Syntax-check Xbox directory iterator with audited ABI stubs
+      - name: Create audited Xbox ABI stubs
         run: |
           set -euxo pipefail
           mkdir -p /tmp/echocore-stubs/xecore
           cat > /tmp/echocore-stubs/xecore/xboxkrnl_types.h <<'EOF'
           #ifndef ECHO_TEST_XBOXKRNL_TYPES_H
           #define ECHO_TEST_XBOXKRNL_TYPES_H
+          #include <stdbool.h>
           #include <stdint.h>
           typedef int32_t NTSTATUS;
           typedef void *HANDLE;
+          typedef void *HMODULE;
           typedef struct _ANSI_STRING { uint16_t Length; uint16_t MaximumLength; char *Buffer; } ANSI_STRING;
           typedef struct _OBJECT_ATTRIBUTES { HANDLE root_directory; ANSI_STRING *name_ptr; uint32_t attributes; } OBJECT_ATTRIBUTES;
           typedef struct _IO_STATUS_BLOCK { union { NTSTATUS Status; void *Pointer; }; uint32_t Information; } IO_STATUS_BLOCK;
@@ -85,6 +87,28 @@ jobs:
           void RtlInitAnsiString(ANSI_STRING *dest, const char *source);
           #endif
           EOF
+          cat > /tmp/echocore-stubs/xecore/xboxkrnl_modules.h <<'EOF'
+          #ifndef ECHO_TEST_XBOXKRNL_MODULES_H
+          #define ECHO_TEST_XBOXKRNL_MODULES_H
+          #include "xboxkrnl_types.h"
+          NTSTATUS XexGetModuleHandle(const char *name, HMODULE *out_hmodule);
+          NTSTATUS XexGetProcedureAddress(HMODULE hmodule, uint32_t ordinal, void **out_function_ptr);
+          #endif
+          EOF
+          cat > /tmp/echocore-stubs/xecore/xboxkrnl_mem.h <<'EOF'
+          #ifndef ECHO_TEST_XBOXKRNL_MEM_H
+          #define ECHO_TEST_XBOXKRNL_MEM_H
+          #include "xboxkrnl_types.h"
+          bool MmIsAddressValid(void *address);
+          #endif
+          EOF
+
+      - name: Syntax-check Xbox adapters with audited ABI stubs
+        run: |
+          set -euxo pipefail
           clang -std=c11 -Wall -Wextra -Werror -pedantic \
             -I/tmp/echocore-stubs \
             -fsyntax-only echocore/contract/echo_dir_list_xbox.c
+          clang -std=c11 -Wall -Wextra -Werror -pedantic \
+            -I/tmp/echocore-stubs \
+            -fsyntax-only echocore/contract/echo_dashlaunch_snapshot_xbox.c
