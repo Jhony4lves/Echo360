@@ -8,6 +8,7 @@ enum class SaveVaultIntegritySeverity {
 
 enum class SaveVaultIntegrityCode {
     MissingFile,
+    WrongObjectType,
     SizeMismatch,
     HashMismatch,
     ExtraFile,
@@ -43,13 +44,17 @@ data class SaveVaultIntegrityReport(
         get() = findings.none { it.severity == SaveVaultIntegritySeverity.Error }
 
     val complete: Boolean
-        get() = checkedFiles == expectedFiles && findings.none { it.code == SaveVaultIntegrityCode.MissingFile }
+        get() = checkedFiles == expectedFiles && findings.none {
+            it.code == SaveVaultIntegrityCode.MissingFile ||
+                it.code == SaveVaultIntegrityCode.WrongObjectType
+        }
 }
 
 object SaveVaultIntegrityEngine {
     fun verify(
         manifest: SaveVaultManifest,
         localFiles: List<SaveVaultLocalFileEvidence>,
+        wrongObjectTypePaths: List<String> = emptyList(),
         extraRelativePaths: List<String> = emptyList(),
     ): SaveVaultIntegrityReport {
         val localByPath = linkedMapOf<String, SaveVaultLocalFileEvidence>()
@@ -65,6 +70,18 @@ object SaveVaultIntegrityEngine {
             "Somente arquivos declarados devem ser hashados como evidência local."
         }
 
+        val wrongTypes = wrongObjectTypePaths.map(SaveVaultPathPolicy::validateRelativePath)
+        require(wrongTypes.distinctBy(String::lowercase).size == wrongTypes.size) {
+            "Lista de tipos locais incorretos contém paths duplicados."
+        }
+        require(wrongTypes.all { it.lowercase() in expectedKeys }) {
+            "WrongObjectType só pode apontar para paths declarados no manifesto."
+        }
+        require(wrongTypes.none { it.lowercase() in localByPath }) {
+            "Um path não pode ser arquivo hashado e tipo incorreto ao mesmo tempo."
+        }
+        val wrongTypeKeys = wrongTypes.mapTo(hashSetOf()) { it.lowercase() }
+
         val normalizedExtras = extraRelativePaths.map(SaveVaultPathPolicy::validateRelativePath)
         require(normalizedExtras.distinctBy(String::lowercase).size == normalizedExtras.size) {
             "Lista de arquivos extras contém paths duplicados."
@@ -77,7 +94,18 @@ object SaveVaultIntegrityEngine {
         var checked = 0
 
         manifest.files.forEach { expected ->
-            val actual = localByPath[expected.relativePath.lowercase()]
+            val key = expected.relativePath.lowercase()
+            if (key in wrongTypeKeys) {
+                findings += SaveVaultIntegrityFinding(
+                    code = SaveVaultIntegrityCode.WrongObjectType,
+                    severity = SaveVaultIntegritySeverity.Error,
+                    relativePath = expected.relativePath,
+                    evidence = "O manifesto espera um arquivo, mas o path local existe com outro tipo.",
+                )
+                return@forEach
+            }
+
+            val actual = localByPath[key]
             if (actual == null) {
                 findings += SaveVaultIntegrityFinding(
                     code = SaveVaultIntegrityCode.MissingFile,
