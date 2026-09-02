@@ -15,6 +15,7 @@ import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.domain.library.matchObservedGame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -101,8 +102,11 @@ internal fun EchoPlaytimeMonitor() {
                     delay(ONLINE_SAMPLE_MS)
                 }
             } finally {
-                // repeatOnLifecycle cancels this block when the app leaves STARTED.
-                withContext(Dispatchers.IO) { playSessionStore.stopObserving() }
+                // The child job is already cancelled here; NonCancellable guarantees the
+                // last confirmed session is closed before repeatOnLifecycle fully stops it.
+                withContext(NonCancellable + Dispatchers.IO) {
+                    playSessionStore.stopObserving()
+                }
             }
         }
     }
