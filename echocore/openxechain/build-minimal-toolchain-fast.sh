@@ -19,14 +19,12 @@ for required in "${ROOT}/llvm/llvm" "${ROOT}/xecorelib" "${ROOT}/synthxex"; do
   fi
 done
 
-# Only these installed LLVM-facing components are needed by EchoCore today:
-# - clang (+ resource headers for stdint/stddef)
-# - lld + lld-link symlink for Xbox PE/COFF linkage
-# - llvm-ar + llvm-dlltool symlink for xecorelib import libraries
-#
-# The Xbox toolchain uses Clang's integrated assembler by default, so the
-# external CrossXbox360::Assembler path is not part of this normal build.
-LLVM_COMPONENTS="clang;clang-resource-headers;lld;lld-link;llvm-ar;llvm-dlltool"
+# Only parent components with real install targets belong in an LLVM
+# distribution. lld-link is installed as a symlink of lld; llvm-dlltool is a
+# symlink of llvm-ar. Naming those aliases as distribution components makes
+# LLVMDistributionSupport fail during configure because they intentionally do
+# not have independent install targets.
+LLVM_COMPONENTS="clang;clang-resource-headers;lld;llvm-ar"
 
 rm -rf "${LLVM_BUILD}" "${XECORE_BUILD}" "${SYNTH_BUILD}"
 mkdir -p "${PREFIX}" "${LLVM_BUILD}" "${XECORE_BUILD}" "${SYNTH_BUILD}"
@@ -52,6 +50,15 @@ cmake \
 # still built normally, so this is an optimization, not a binary hack/copy.
 cmake --build "${LLVM_BUILD}" --target distribution --parallel "${PARALLEL}"
 cmake --build "${LLVM_BUILD}" --target install-distribution --parallel "${PARALLEL}"
+
+# Parent installs must have materialized the aliases EchoCore/xecorelib need.
+# Fail here, before writing a cache, if LLVM's symlink install semantics change.
+for binary in clang lld lld-link llvm-ar llvm-dlltool; do
+  if [[ ! -x "${PREFIX}/bin/${binary}" ]]; then
+    echo "EchoCore fast toolchain: expected LLVM tool missing: ${binary}" >&2
+    exit 3
+  fi
+done
 
 cat > "${PREFIX}/bin/clang.cfg" <<'EOF'
 -Wno-main-return-type
