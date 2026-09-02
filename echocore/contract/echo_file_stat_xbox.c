@@ -8,6 +8,10 @@
 #include "echo_path_policy.h"
 #include "echo_readonly_contract.h"
 
+/* Present in Xbox 360 NTSTATUS tables but not yet named by pinned xecorelib. */
+#define ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND ((NTSTATUS)0xC000003AU)
+#define ECHO_NTSTATUS_NOT_A_DIRECTORY       ((NTSTATUS)0xC0000103U)
+
 typedef struct echo_file_stat_result {
     uint8_t status;
     uint8_t object_type;
@@ -19,11 +23,13 @@ static uint8_t echo_stat_status_from_ntstatus(NTSTATUS status) {
         case STATUS_NO_SUCH_FILE:
         case STATUS_OBJECT_NAME_NOT_FOUND:
         case STATUS_NOT_FOUND:
+        case ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND:
             return ECHO_STATUS_NOT_FOUND;
         case STATUS_ACCESS_DENIED:
             return ECHO_STATUS_ACCESS_DENIED;
         case STATUS_OBJECT_NAME_INVALID:
         case STATUS_INVALID_PARAMETER:
+        case ECHO_NTSTATUS_NOT_A_DIRECTORY:
             return ECHO_STATUS_INVALID_PATH;
         case STATUS_NOT_SUPPORTED:
         case STATUS_NOT_IMPLEMENTED:
