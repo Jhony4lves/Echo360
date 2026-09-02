@@ -4,7 +4,7 @@
 #include <xecore/xboxkrnl_mem.h>
 #include <xecore/xboxkrnl_types.h>
 
-#include "echo_doctor_telemetry.h"
+#include "echo_doctor_telemetry_xbox.h"
 
 #define ECHO_SMC_MESSAGE_BYTES 16U
 #define ECHO_SMC_TEMPERATURE_COMMAND 0x07U
