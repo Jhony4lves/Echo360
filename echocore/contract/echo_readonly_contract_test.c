@@ -10,6 +10,9 @@ int main(void) {
     uint8_t stat[ECHO_FILE_STAT_BYTES];
     char native[ECHO_NATIVE_PATH_MAX];
     size_t native_len = 0U;
+    const char root1[] = "Hdd1:";
+    const char root2[] = "Hdd1:/";
+    const char root3[] = "hDd1:\\";
     const char good1[] = "Hdd1:/Content/0000000000000000/465307E4/00007000/default.xex";
     const char good2[] = "hDd1:\\Content\\0000000000000000\\465307E4\\00000002\\file";
     const char bad_parent[] = "Hdd1:/Content/../flash.xex";
@@ -48,6 +51,9 @@ int main(void) {
     assert(echo_ro_read_be32(stat + 4U) == 0U);
     assert(echo_ro_read_be64(stat + 8U) == UINT64_C(0x123456789));
 
+    assert(echo_path_is_safe_readonly(root1, strlen(root1)) == 1);
+    assert(echo_path_is_safe_readonly(root2, strlen(root2)) == 1);
+    assert(echo_path_is_safe_readonly(root3, strlen(root3)) == 1);
     assert(echo_path_is_safe_readonly(good1, strlen(good1)) == 1);
     assert(echo_path_is_safe_readonly(good2, strlen(good2)) == 1);
     assert(echo_path_is_safe_readonly(bad_parent, strlen(bad_parent)) == 0);
@@ -55,6 +61,36 @@ int main(void) {
     assert(echo_path_is_safe_readonly(bad_double_separator, strlen(bad_double_separator)) == 0);
     assert(echo_path_is_safe_readonly(bad_ftp_alias, strlen(bad_ftp_alias)) == 0);
     assert(echo_path_is_safe_readonly(bad_colon, strlen(bad_colon)) == 0);
+
+    assert(echo_path_to_native_hdd1(
+        root1,
+        strlen(root1),
+        native,
+        sizeof(native),
+        &native_len
+    ) == 0);
+    assert(strcmp(native, "\\Device\\Harddisk0\\Partition1") == 0);
+    assert(native_len == strlen(native));
+
+    assert(echo_path_to_native_hdd1(
+        root2,
+        strlen(root2),
+        native,
+        sizeof(native),
+        &native_len
+    ) == 0);
+    assert(strcmp(native, "\\Device\\Harddisk0\\Partition1") == 0);
+    assert(native_len == strlen(native));
+
+    assert(echo_path_to_native_hdd1(
+        root3,
+        strlen(root3),
+        native,
+        sizeof(native),
+        &native_len
+    ) == 0);
+    assert(strcmp(native, "\\Device\\Harddisk0\\Partition1") == 0);
+    assert(native_len == strlen(native));
 
     assert(echo_path_to_native_hdd1(
         good1,
