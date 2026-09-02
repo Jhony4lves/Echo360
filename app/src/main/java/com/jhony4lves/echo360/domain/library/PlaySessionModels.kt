@@ -47,7 +47,8 @@ data class PlaytimeSummary(
  * the gap stays within [maxContinuousGapMs]. Large gaps are split instead of
  * being interpreted as playtime. A game switch/non-game observation closes the
  * previous session at its last confirmed observation, so uncertain tail time is
- * never added silently.
+ * never added silently. [stopObserving] also closes at the last confirmed sample
+ * when app observation stops, preventing background-app time from being counted.
  */
 class PlaySessionEngine(
     private val maxRecentSessions: Int = 200,
@@ -100,7 +101,12 @@ class PlaySessionEngine(
         require(observedAtEpochMs >= 0L) { "Timestamp de observação inválido." }
         val active = ledger.active ?: return ledger
         if (observedAtEpochMs < active.lastSeenAtEpochMs) return ledger
+        return stopObserving(ledger)
+    }
 
+    /** Closes the current session at the last confirmed NOVA sample. */
+    fun stopObserving(ledger: PlaySessionLedger): PlaySessionLedger {
+        val active = ledger.active ?: return ledger
         return PlaySessionLedger(
             active = null,
             recent = prependCompleted(closeAtLastConfirmed(active), ledger.recent),
