@@ -27,19 +27,32 @@ class FtpTransportIntegrationTest {
         var lastProgress = 0L
 
         runBlocking {
-            val session = AuroraPassiveFtpSession.connect(
-                profile = profile(auroraPort = server.port),
-                timeoutMs = 2_000,
-            )
-            try {
-                session.upload(
-                    canonicalPath = "/Hdd1/Content/test.bin",
-                    source = ByteArrayInputStream(payload),
-                ) { sent -> lastProgress = sent }
+            val session = try {
+                AuroraPassiveFtpSession.connect(
+                    profile = profile(auroraPort = server.port),
+                    timeoutMs = 2_000,
+                )
+            } catch (error: Throwable) {
+                failAt("Aurora control connect/login", server, error)
+            }
 
-                assertEquals(payload.size.toLong(), session.size("/Hdd1/Content/test.bin"))
+            try {
+                try {
+                    session.upload(
+                        canonicalPath = "/Hdd1/Content/test.bin",
+                        source = ByteArrayInputStream(payload),
+                    ) { sent -> lastProgress = sent }
+                } catch (error: Throwable) {
+                    failAt("Aurora passive STOR", server, error)
+                }
+
+                try {
+                    assertEquals(payload.size.toLong(), session.size("/Hdd1/Content/test.bin"))
+                } catch (error: Throwable) {
+                    failAt("Aurora SIZE verification", server, error)
+                }
             } finally {
-                session.close()
+                runCatching { session.close() }
             }
         }
 
@@ -59,19 +72,32 @@ class FtpTransportIntegrationTest {
         var lastProgress = 0L
 
         runBlocking {
-            val session = FtpDllActiveFtpSession.connect(
-                profile = profile(ftpDllPort = server.port),
-                timeoutMs = 2_000,
-            )
-            try {
-                session.upload(
-                    canonicalPath = "/Hdd1/Content/test.bin",
-                    source = ByteArrayInputStream(payload),
-                ) { sent -> lastProgress = sent }
+            val session = try {
+                FtpDllActiveFtpSession.connect(
+                    profile = profile(ftpDllPort = server.port),
+                    timeoutMs = 2_000,
+                )
+            } catch (error: Throwable) {
+                failAt("FTPdll control connect/login", server, error)
+            }
 
-                assertEquals(payload.size.toLong(), session.size("/Hdd1/Content/test.bin"))
+            try {
+                try {
+                    session.upload(
+                        canonicalPath = "/Hdd1/Content/test.bin",
+                        source = ByteArrayInputStream(payload),
+                    ) { sent -> lastProgress = sent }
+                } catch (error: Throwable) {
+                    failAt("FTPdll active STOR", server, error)
+                }
+
+                try {
+                    assertEquals(payload.size.toLong(), session.size("/Hdd1/Content/test.bin"))
+                } catch (error: Throwable) {
+                    failAt("FTPdll SIZE verification", server, error)
+                }
             } finally {
-                session.close()
+                runCatching { session.close() }
             }
         }
 
@@ -82,6 +108,13 @@ class FtpTransportIntegrationTest {
         assertTrue(server.commands.any { it.startsWith("PORT ") })
         assertFalse(server.commands.any { it == "PASV" })
         assertTrue(server.commands.any { it == "STOR /fHdd/Content/test.bin" })
+    }
+
+    private fun failAt(stage: String, server: FakeFtpServer, error: Throwable): Nothing {
+        throw AssertionError(
+            "$stage failed. ${server.diagnostics()}",
+            error,
+        )
     }
 
     private fun profile(
@@ -107,14 +140,22 @@ class FtpTransportIntegrationTest {
     ) {
         val port: Int = controlListener.localPort
         val commands: MutableList<String> = Collections.synchronizedList(mutableListOf())
+        private val events: MutableList<String> = Collections.synchronizedList(mutableListOf())
 
         private val received = ByteArrayOutputStream()
         private val failure = AtomicReference<Throwable?>()
-        private val worker = thread(start = true, name = "echo360-fake-ftp") {
+        private val worker = thread(
+            start = true,
+            isDaemon = true,
+            name = "echo360-fake-ftp-${mode.name.lowercase()}",
+        ) {
+            events += "server-thread-start control=${controlListener.localSocketAddress}"
             try {
                 serve()
+                events += "server-thread-complete"
             } catch (error: Throwable) {
                 failure.set(error)
+                events += "server-thread-failed:${error::class.java.simpleName}:${error.message}"
             } finally {
                 runCatching { controlListener.close() }
             }
@@ -122,19 +163,37 @@ class FtpTransportIntegrationTest {
 
         fun receivedBytes(): ByteArray = received.toByteArray()
 
+        fun diagnostics(): String {
+            val commandSnapshot = synchronized(commands) { commands.toList() }
+            val eventSnapshot = synchronized(events) { events.toList() }
+            val serverFailure = failure.get()
+            return buildString {
+                append("mode=$mode, controlPort=$port")
+                append(", commands=")
+                append(commandSnapshot.joinToString(" | ").ifBlank { "<none>" })
+                append(", events=")
+                append(eventSnapshot.joinToString(" | ").ifBlank { "<none>" })
+                if (serverFailure != null) {
+                    append(", serverFailure=${serverFailure::class.java.name}:${serverFailure.message}")
+                }
+            }
+        }
+
         fun await() {
             worker.join(4_000)
             if (worker.isAlive) {
                 runCatching { controlListener.close() }
-                fail("Fake FTP server did not terminate.")
+                fail("Fake FTP server did not terminate. ${diagnostics()}")
             }
             failure.get()?.let { error ->
-                throw AssertionError("Fake FTP server failed. Commands=${commands.joinToString()}", error)
+                throw AssertionError("Fake FTP server failed. ${diagnostics()}", error)
             }
         }
 
         private fun serve() {
+            events += "control-await-accept"
             controlListener.accept().use { control ->
+                events += "control-accepted local=${control.localSocketAddress} remote=${control.remoteSocketAddress}"
                 control.soTimeout = 3_000
                 val reader = control.getInputStream().bufferedReader(Charsets.US_ASCII)
                 val writer = control.getOutputStream().bufferedWriter(Charsets.US_ASCII)
@@ -142,6 +201,7 @@ class FtpTransportIntegrationTest {
                 var activeEndpoint: InetSocketAddress? = null
 
                 fun reply(line: String) {
+                    events += "reply:${line.substringBefore(' ')}"
                     writer.write(line)
                     writer.write("\r\n")
                     writer.flush()
@@ -152,6 +212,7 @@ class FtpTransportIntegrationTest {
                 while (true) {
                     val command = reader.readLine() ?: break
                     commands += command
+                    events += "command:${command.substringBefore(' ').uppercase()}"
                     val verb = command.substringBefore(' ').uppercase()
 
                     when (verb) {
@@ -165,12 +226,14 @@ class FtpTransportIntegrationTest {
                             passiveListener?.close()
                             passiveListener = ServerSocket(0)
                             val p = passiveListener.localPort
+                            events += "passive-listen:${passiveListener.localSocketAddress}"
                             reply("227 Entering Passive Mode (127,0,0,1,${p / 256},${p % 256})")
                         }
                         "EPSV" -> reply("500 EPSV not supported")
                         "PORT" -> {
                             check(mode == Mode.Active) { "PORT used against passive-only fake server." }
                             activeEndpoint = parsePort(command.substringAfter(' '))
+                            events += "active-target:$activeEndpoint"
                             reply("200 PORT command successful")
                         }
                         "STOR" -> {
@@ -178,20 +241,26 @@ class FtpTransportIntegrationTest {
                             when (mode) {
                                 Mode.Passive -> {
                                     val listener = checkNotNull(passiveListener) { "PASV was not negotiated before STOR." }
+                                    events += "passive-await-data:${listener.localSocketAddress}"
                                     listener.accept().use { data ->
+                                        events += "passive-data-accepted remote=${data.remoteSocketAddress}"
                                         data.soTimeout = 3_000
                                         data.getInputStream().copyTo(received)
                                     }
+                                    events += "passive-data-complete bytes=${received.size()}"
                                     listener.close()
                                     passiveListener = null
                                 }
                                 Mode.Active -> {
                                     val endpoint = checkNotNull(activeEndpoint) { "PORT was not negotiated before STOR." }
+                                    events += "active-data-connect:$endpoint"
                                     Socket().use { data ->
                                         data.soTimeout = 3_000
                                         data.connect(endpoint, 2_000)
+                                        events += "active-data-connected local=${data.localSocketAddress} remote=${data.remoteSocketAddress}"
                                         data.getInputStream().copyTo(received)
                                     }
+                                    events += "active-data-complete bytes=${received.size()}"
                                 }
                             }
                             reply("226 Transfer complete")
