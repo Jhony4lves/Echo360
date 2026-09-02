@@ -40,6 +40,7 @@ int main(void) {
     assert((caps & ECHO_CAP_CORE_INFO) != 0U);
     assert((caps & ECHO_CAP_CURRENT_TITLE) != 0U);
     assert((caps & ECHO_CAP_FILE_STAT) != 0U);
+    assert((caps & ECHO_CAP_DOCTOR_TELEMETRY) != 0U);
     assert((caps & ECHO_CAP_DIR_LIST) == 0U);
     assert((echo_ro_read_be32(info + 24U) & ECHO_CORE_STATUS_NETWORK_LINK_ACTIVE) != 0U);
     assert((echo_ro_read_be32(info + 24U) & ECHO_CORE_STATUS_RESIDENT_PLUGIN) == 0U);
