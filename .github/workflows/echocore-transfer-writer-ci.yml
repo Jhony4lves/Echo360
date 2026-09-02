@@ -7,6 +7,7 @@ on:
     paths:
       - 'echocore/openxechain/echo_transfer_*'
       - 'echocore/openxechain/echo_path.h'
+      - 'echocore/openxechain/echo_auth_state.h'
       - 'echocore/tests/**'
       - '.github/workflows/echocore-transfer-writer-ci.yml'
 
