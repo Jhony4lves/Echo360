@@ -4,6 +4,9 @@ import android.util.Base64
 import com.jhony4lves.echo360.domain.doctor.DashLaunchOption
 import com.jhony4lves.echo360.domain.doctor.DashLaunchSnapshot
 import com.jhony4lves.echo360.domain.doctor.DashLaunchVersion
+import com.jhony4lves.echo360.domain.doctor.DoctorMemorySnapshot
+import com.jhony4lves.echo360.domain.doctor.DoctorTemperatureSnapshot
+import com.jhony4lves.echo360.domain.doctor.DoctorTemperatureUnit
 import com.jhony4lves.echo360.domain.library.NowPlaying
 import com.jhony4lves.echo360.domain.xbox.XboxDevicePath
 import com.jhony4lves.echo360.domain.xbox.XboxEndpoint
@@ -23,10 +26,10 @@ import java.util.UUID
 /**
  * Safe authenticated subset of Aurora NOVA.
  *
- * This client exposes runtime title/launch operations plus the non-identity
- * DashLaunch settings snapshot used by EchoDoctor. It intentionally does not
- * request /system, CPU/DVD keys, serials, console IDs, or other identity
- * material. JWTs live only in process memory.
+ * This client exposes runtime title/launch operations plus non-identity
+ * DashLaunch, RAM and temperature snapshots used by EchoDoctor. It
+ * intentionally does not request /system, CPU/DVD keys, serials, console IDs,
+ * or other identity material. JWTs live only in process memory.
  */
 class AuroraNovaClient(
     private val tcpProbe: TcpPortProbe = TcpPortProbe(),
@@ -45,6 +48,14 @@ class AuroraNovaClient(
     suspend fun dashLaunch(profile: XboxProfile): DashLaunchSnapshot = withContext(Dispatchers.IO) {
         val payload = authenticatedJsonGet(profile, "/dashlaunch")
         parseDashLaunch(payload)
+    }
+
+    suspend fun doctorMemory(profile: XboxProfile): DoctorMemorySnapshot = withContext(Dispatchers.IO) {
+        parseDoctorMemory(authenticatedJsonGet(profile, "/memory"))
+    }
+
+    suspend fun doctorTemperature(profile: XboxProfile): DoctorTemperatureSnapshot = withContext(Dispatchers.IO) {
+        parseDoctorTemperature(authenticatedJsonGet(profile, "/temperature"))
     }
 
     suspend fun launch(
@@ -246,6 +257,36 @@ internal fun parseDashLaunch(payload: JSONObject): DashLaunchSnapshot {
             minor = number.optLong("minor", 0L),
             build = number.optLong("build", 0L),
         ),
+    )
+}
+
+internal fun parseDoctorMemory(payload: JSONObject): DoctorMemorySnapshot {
+    require(payload.has("free") && payload.has("used") && payload.has("total")) {
+        "NOVA /memory retornou um schema incompleto."
+    }
+    return DoctorMemorySnapshot(
+        freeBytes = payload.optLong("free", -1L),
+        usedBytes = payload.optLong("used", -1L),
+        totalBytes = payload.optLong("total", -1L),
+    )
+}
+
+internal fun parseDoctorTemperature(payload: JSONObject): DoctorTemperatureSnapshot {
+    require(
+        payload.has("cpu") && payload.has("gpu") && payload.has("memory") &&
+            payload.has("case") && payload.has("celsius"),
+    ) { "NOVA /temperature retornou um schema incompleto." }
+
+    return DoctorTemperatureSnapshot(
+        cpu = payload.optDouble("cpu", Double.NaN),
+        gpu = payload.optDouble("gpu", Double.NaN),
+        memory = payload.optDouble("memory", Double.NaN),
+        case = payload.optDouble("case", Double.NaN),
+        reportedUnit = if (payload.optBoolean("celsius", true)) {
+            DoctorTemperatureUnit.Celsius
+        } else {
+            DoctorTemperatureUnit.Fahrenheit
+        },
     )
 }
 
