@@ -18,10 +18,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.ui.remote.EchoRemoteScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
+import com.jhony4lves.echo360.ui.tu.EchoTuScreen
 
 private enum class XboxHubMode(val label: String) {
     Connection("CONEXÃO"),
     Remote("REMOTE"),
+    TitleUpdates("TU"),
 }
 
 @Composable
@@ -56,6 +58,11 @@ fun XboxHubScreen(modifier: Modifier = Modifier) {
                     .weight(1f),
             )
             XboxHubMode.Remote -> EchoRemoteScreen(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            )
+            XboxHubMode.TitleUpdates -> EchoTuScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
