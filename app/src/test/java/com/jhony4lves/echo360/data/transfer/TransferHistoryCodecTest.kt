@@ -67,7 +67,7 @@ class TransferHistoryCodecTest {
     }
 
     private fun sampleEntry(
-        id: String,
+        id: String = "sample",
         startedAt: Long = 1_000L,
         finishedAt: Long = 2_500L,
         transferredBytes: Long = 1_024L,
