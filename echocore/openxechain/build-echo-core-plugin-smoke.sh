@@ -62,10 +62,12 @@ rm -f "${OBJ}" "${PE}" "${XEX}"
 
 test -s "${PE}"
 
+# DashLaunch plugins are system DLLs, not generic DLL XEX images. In the XEX2
+# module flags this is EXPORTS | DLL (0x00000002 | 0x00000008).
 "${SYNTHXEX}" \
   --input "${PE}" \
   --output "${XEX}" \
-  --type dll
+  --type sysdll
 
 test -s "${XEX}"
 
@@ -77,11 +79,22 @@ import sys
 pe = Path(sys.argv[1])
 xex = Path(sys.argv[2])
 data = pe.read_bytes()
+xex_data = xex.read_bytes()
 
 if data[:2] != b"MZ":
     raise SystemExit("Plugin PE is missing MZ signature")
-if xex.read_bytes()[:4] != b"XEX2":
+if xex_data[:4] != b"XEX2":
     raise SystemExit("Plugin XEX is missing XEX2 signature")
+
+# XEX2 header fields are big-endian. A DashLaunch system DLL must carry both
+# XEX_MOD_FLAG_EXPORTS (0x2) and XEX_MOD_FLAG_DLL (0x8).
+module_flags = struct.unpack_from(">I", xex_data, 4)[0]
+expected_module_flags = 0x0000000A
+if module_flags != expected_module_flags:
+    raise SystemExit(
+        f"Unexpected plugin XEX module flags: 0x{module_flags:08X} "
+        f"(expected sysdll 0x{expected_module_flags:08X})"
+    )
 
 pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
 if data[pe_offset:pe_offset + 4] != b"PE\0\0":
@@ -99,6 +112,12 @@ image_base = struct.unpack_from("<I", data, optional + 28)[0]
 if image_base != 0x90B00000:
     raise SystemExit(f"Unexpected plugin image base: 0x{image_base:08X}")
 
-print(f"EchoCore plugin PE:  {pe} ({pe.stat().st_size} bytes, DLL, base 0x{image_base:08X})")
-print(f"EchoCore plugin XEX: {xex} ({xex.stat().st_size} bytes, magic XEX2)")
+print(
+    f"EchoCore plugin PE:  {pe} "
+    f"({pe.stat().st_size} bytes, DLL, base 0x{image_base:08X})"
+)
+print(
+    f"EchoCore plugin XEX: {xex} "
+    f"({xex.stat().st_size} bytes, magic XEX2, sysdll flags 0x{module_flags:08X})"
+)
 PY
