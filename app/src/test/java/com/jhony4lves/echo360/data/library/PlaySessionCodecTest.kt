@@ -1,5 +1,6 @@
 package com.jhony4lves.echo360.data.library
 
+import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.domain.library.PlaySession
 import com.jhony4lves.echo360.domain.library.PlaySessionLedger
 import org.junit.Assert.assertEquals
@@ -97,6 +98,27 @@ class PlaySessionCodecTest {
 
         assertEquals(1, decoded.recent.size)
     }
+
+    @Test
+    fun `playtime key ignores media and disc variants of the same title`() {
+        val firstDisc = game(databaseId = 1L, mediaId = 0x11111111, disc = 1)
+        val secondDisc = game(databaseId = 2L, mediaId = 0x22222222, disc = 2)
+
+        assertEquals(observedPlaytimeKey(firstDisc), observedPlaytimeKey(secondDisc))
+        assertEquals("title:465307E4", observedPlaytimeKey(firstDisc))
+    }
+
+    private fun game(databaseId: Long, mediaId: Long, disc: Int) = GameEntry(
+        databaseId = databaseId,
+        titleId = 0x465307E4,
+        mediaId = mediaId,
+        discNumber = disc,
+        title = "Dark Souls II",
+        directory = "Games/Dark Souls II",
+        executable = "default.xex",
+        baseVersion = null,
+        contentRoot = "/Hdd1",
+    )
 
     private fun session(
         id: String,
