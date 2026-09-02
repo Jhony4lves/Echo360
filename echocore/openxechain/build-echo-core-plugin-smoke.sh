@@ -31,24 +31,21 @@ fi
 mkdir -p "${OUT_DIR}"
 rm -f "${OBJ}" "${PE}" "${XEX}"
 
-# Compile only. The pinned OpenXeChain clang driver is currently hard-coded for
-# title linkage, so DLL linkage is intentionally performed by lld-link below.
+# Compile only. Do not enable function/data sections: the pinned OpenXeChain
+# PowerPC/COFF backend emits broken one_only COMDAT definition symbols.
 "${CLANG}" \
   -std=c11 \
   -Os \
   -ffreestanding \
   -fno-builtin \
-  -ffunction-sections \
-  -fdata-sections \
   -Wall \
   -Wextra \
   -Werror \
   -c "${SOURCE}" \
   -o "${OBJ}"
 
-# These are the Xbox DLL linker settings used by the OpenXeChain fork before
-# its driver was switched to title-only defaults. Keep this smoke image at the
-# historical DLL base until hardware/plugin compatibility is proven.
+# The pinned OpenXeChain clang driver is title-oriented, so DLL linkage is
+# intentionally performed explicitly with lld-link.
 "${LLD_LINK}" \
   /SUBSYSTEM:xbox360 \
   /FIXED \
@@ -62,8 +59,6 @@ rm -f "${OBJ}" "${PE}" "${XEX}"
 
 test -s "${PE}"
 
-# DashLaunch plugins are system DLLs, not generic DLL XEX images. In the XEX2
-# module flags this is EXPORTS | DLL (0x00000002 | 0x00000008).
 "${SYNTHXEX}" \
   --input "${PE}" \
   --output "${XEX}" \
@@ -80,30 +75,20 @@ pe = Path(sys.argv[1])
 xex = Path(sys.argv[2])
 data = pe.read_bytes()
 xex_data = xex.read_bytes()
-
 if data[:2] != b"MZ":
     raise SystemExit("Plugin PE is missing MZ signature")
 if xex_data[:4] != b"XEX2":
     raise SystemExit("Plugin XEX is missing XEX2 signature")
-
-# XEX2 header fields are big-endian. A DashLaunch system DLL must carry both
-# XEX_MOD_FLAG_EXPORTS (0x2) and XEX_MOD_FLAG_DLL (0x8).
 module_flags = struct.unpack_from(">I", xex_data, 4)[0]
 expected_module_flags = 0x0000000A
 if module_flags != expected_module_flags:
-    raise SystemExit(
-        f"Unexpected plugin XEX module flags: 0x{module_flags:08X} "
-        f"(expected sysdll 0x{expected_module_flags:08X})"
-    )
-
+    raise SystemExit(f"Unexpected plugin XEX module flags: 0x{module_flags:08X} (expected sysdll 0x{expected_module_flags:08X})")
 pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
 if data[pe_offset:pe_offset + 4] != b"PE\0\0":
     raise SystemExit("Plugin image is missing PE signature")
-
 characteristics = struct.unpack_from("<H", data, pe_offset + 4 + 18)[0]
 if not (characteristics & 0x2000):
     raise SystemExit(f"Plugin PE does not have IMAGE_FILE_DLL set: 0x{characteristics:04X}")
-
 optional = pe_offset + 4 + 20
 magic = struct.unpack_from("<H", data, optional)[0]
 if magic != 0x10B:
@@ -111,13 +96,6 @@ if magic != 0x10B:
 image_base = struct.unpack_from("<I", data, optional + 28)[0]
 if image_base != 0x90B00000:
     raise SystemExit(f"Unexpected plugin image base: 0x{image_base:08X}")
-
-print(
-    f"EchoCore plugin PE:  {pe} "
-    f"({pe.stat().st_size} bytes, DLL, base 0x{image_base:08X})"
-)
-print(
-    f"EchoCore plugin XEX: {xex} "
-    f"({xex.stat().st_size} bytes, magic XEX2, sysdll flags 0x{module_flags:08X})"
-)
+print(f"EchoCore plugin PE:  {pe} ({pe.stat().st_size} bytes, DLL, base 0x{image_base:08X})")
+print(f"EchoCore plugin XEX: {xex} ({xex.stat().st_size} bytes, magic XEX2, sysdll flags 0x{module_flags:08X})")
 PY
