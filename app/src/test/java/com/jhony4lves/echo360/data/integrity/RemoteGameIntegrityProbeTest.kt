@@ -102,7 +102,7 @@ class RemoteGameIntegrityProbeTest {
     }
 
     @Test
-    fun `transport failure remains warning instead of false missing file`() = runBlocking {
+    fun `transport failure stays informational instead of degrading game health`() = runBlocking {
         val session = FakeSession(
             listBlock = { error("connection reset") },
             sizeBlock = { throw IllegalStateException("timeout") },
@@ -113,7 +113,7 @@ class RemoteGameIntegrityProbeTest {
 
         assertFalse(result.verified)
         assertEquals(RemoteGameIntegrityProbe.CODE_DIRECTORY_UNREADABLE, finding.code)
-        assertEquals(IntegritySeverity.Warning, finding.severity)
+        assertEquals(IntegritySeverity.Info, finding.severity)
         assertFalse(finding.code.contains("missing"))
     }
 
