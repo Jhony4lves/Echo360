@@ -9,6 +9,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.jhony4lves.echo360.data.library.AuroraLibraryRepository
 import com.jhony4lves.echo360.data.library.CurrentTitleRepository
+import com.jhony4lves.echo360.data.library.LaunchAttemptStore
 import com.jhony4lves.echo360.data.library.PlaySessionStore
 import com.jhony4lves.echo360.data.library.PlayerStateStore
 import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
@@ -23,16 +24,21 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 /**
- * Foreground-only runtime sampler used to build conservative local playtime.
+ * Foreground-only runtime sampler used to build conservative local playtime and
+ * confirm app-issued launch attempts.
  *
  * NOVA is the production current-title source today. The sampler depends only
  * on Title ID + optional Media ID, so a promoted EchoCore CURRENT_TITLE source
  * can replace/precede NOVA later without inventing richer metadata.
  *
- * A network/auth failure is treated as unknown and never closes a session.
- * Leaving STARTED closes at the last confirmed sample, so app-background time
- * is not silently counted. No background service or persistent Xbox polling is
- * started by this component.
+ * A network/auth failure is treated as unknown and never closes a session or
+ * rejects a launch attempt. An accepted launch is marked CONFIRMED only when
+ * the requested Title ID is actually observed within the bounded window owned
+ * by [LaunchAttemptStore]. No missing observation is interpreted as a crash.
+ *
+ * Leaving STARTED closes playtime at the last confirmed sample, so app-background
+ * time is not silently counted. No background service or persistent Xbox polling
+ * is started by this component.
  */
 @Composable
 internal fun EchoPlaytimeMonitor() {
@@ -42,6 +48,7 @@ internal fun EchoPlaytimeMonitor() {
     val currentTitleRepository = remember(appContext) { CurrentTitleRepository(appContext) }
     val playerStore = remember(appContext) { PlayerStateStore(appContext) }
     val playSessionStore = remember(appContext) { PlaySessionStore(appContext) }
+    val launchAttemptStore = remember(appContext) { LaunchAttemptStore(appContext) }
     val configStore = remember(appContext) { SecureXboxConfigStore(appContext) }
 
     LaunchedEffect(lifecycleOwner) {
@@ -95,7 +102,8 @@ internal fun EchoPlaytimeMonitor() {
                     }
 
                     if (observation == null) {
-                        // Source failure is unknown state, not evidence that play stopped.
+                        // Source failure is unknown state, not evidence that play stopped
+                        // or that a prior launch request was rejected/crashed.
                         delay(OFFLINE_SAMPLE_MS)
                         continue
                     }
@@ -106,6 +114,7 @@ internal fun EchoPlaytimeMonitor() {
                         if (game != null) {
                             playSessionStore.observe(game, observedAt)
                             playerStore.markSeen(game, observedAt)
+                            launchAttemptStore.confirmObserved(game, observedAt)
                         } else {
                             // Source answered, but the active title is not one of the cached games.
                             playSessionStore.observeNonGame(observedAt)
@@ -116,7 +125,7 @@ internal fun EchoPlaytimeMonitor() {
                 }
             } finally {
                 // The child job is already cancelled here; NonCancellable guarantees the
-                // last confirmed session is closed before repeatOnLifecycle fully stops it.
+                // last confirmed play session is closed before repeatOnLifecycle fully stops it.
                 withContext(NonCancellable + Dispatchers.IO) {
                     playSessionStore.stopObserving()
                 }
