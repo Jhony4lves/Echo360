@@ -12,7 +12,7 @@ import java.net.SocketTimeoutException
  * replies, authentication/configuration errors and integrity mismatches must
  * not be retried by this policy.
  */
-internal class FtpRetryPolicy(
+class FtpRetryPolicy(
     val maxSameRouteRetries: Int = 2,
     private val backoffMs: List<Long> = listOf(350L, 900L),
 ) {
