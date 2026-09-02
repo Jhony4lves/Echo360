@@ -12,7 +12,6 @@ import org.junit.Assert.fail
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -130,7 +129,7 @@ class FtpTransportIntegrationTest {
                 fail("Fake FTP server did not terminate.")
             }
             failure.get()?.let { error ->
-                throw AssertionError("Fake FTP server failed.", error)
+                throw AssertionError("Fake FTP server failed. Commands=${commands.joinToString()}", error)
             }
         }
 
@@ -164,11 +163,7 @@ class FtpTransportIntegrationTest {
                         "PASV" -> {
                             check(mode == Mode.Passive) { "PASV used against active-only fake server." }
                             passiveListener?.close()
-                            passiveListener = ServerSocket(
-                                0,
-                                1,
-                                InetAddress.getByName(LOOPBACK),
-                            )
+                            passiveListener = ServerSocket(0)
                             val p = passiveListener.localPort
                             reply("227 Entering Passive Mode (127,0,0,1,${p / 256},${p % 256})")
                         }
@@ -225,19 +220,13 @@ class FtpTransportIntegrationTest {
 
         companion object {
             fun startPassive(): FakeFtpServer = FakeFtpServer(
-                controlListener = newControlListener(),
+                controlListener = ServerSocket(0),
                 mode = Mode.Passive,
             )
 
             fun startActive(): FakeFtpServer = FakeFtpServer(
-                controlListener = newControlListener(),
+                controlListener = ServerSocket(0),
                 mode = Mode.Active,
-            )
-
-            private fun newControlListener(): ServerSocket = ServerSocket(
-                0,
-                1,
-                InetAddress.getByName(LOOPBACK),
             )
         }
 
