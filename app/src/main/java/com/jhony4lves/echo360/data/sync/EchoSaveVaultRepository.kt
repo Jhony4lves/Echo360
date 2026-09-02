@@ -14,8 +14,8 @@ import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import java.io.DigestOutputStream
 import java.io.FileOutputStream
+import java.security.DigestOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
