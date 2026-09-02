@@ -34,7 +34,7 @@ class PlaySessionStore(context: Context) {
         val next = engine.observe(
             ledger = current,
             observation = PlayObservation(
-                stableKey = game.stableKey,
+                stableKey = observedPlaytimeKey(game),
                 titleId = game.titleId,
                 mediaId = game.mediaId,
                 title = game.title,
@@ -65,7 +65,7 @@ class PlaySessionStore(context: Context) {
 
     @Synchronized
     fun summaryFor(game: GameEntry, recentLimit: Int = 6): PlaytimeSummary =
-        engine.summaryFor(load(), game.stableKey, recentLimit)
+        engine.summaryFor(load(), observedPlaytimeKey(game), recentLimit)
 
     @Synchronized
     fun timeline(limit: Int = 20): List<PlaySession> {
@@ -97,6 +97,9 @@ class PlaySessionStore(context: Context) {
         const val MAX_CONTINUOUS_GAP_MS = 3 * 60_000L
     }
 }
+
+/** Playtime is game-level, so multiple discs/media variants share one Title ID bucket. */
+internal fun observedPlaytimeKey(game: GameEntry): String = "title:${game.titleIdHex}"
 
 internal object PlaySessionCodec {
     private const val VERSION = "1"
