@@ -6,10 +6,17 @@ import com.jhony4lves.echo360.domain.library.GameStatus
 import com.jhony4lves.echo360.domain.library.PlayerGameState
 
 class PlayerStateStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("echo_player_state", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences("echo_player_state", Context.MODE_PRIVATE)
+    private val capabilityStore = GameCapabilityMetadataStore(appContext)
 
-    fun snapshot(games: List<GameEntry>): Map<String, PlayerGameState> =
-        games.associate { game -> game.stableKey to stateFor(game) }
+    fun snapshot(games: List<GameEntry>): Map<String, PlayerGameState> {
+        // Hydrate the process-local capability catalog at the same point the
+        // Library already refreshes its player-state snapshot. No extra network
+        // work and no title-name inference are introduced.
+        capabilityStore.snapshot(games)
+        return games.associate { game -> game.stableKey to stateFor(game) }
+    }
 
     fun stateFor(game: GameEntry): PlayerGameState {
         val key = game.stableKey
