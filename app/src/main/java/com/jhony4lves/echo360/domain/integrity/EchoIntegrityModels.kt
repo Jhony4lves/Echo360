@@ -1,7 +1,5 @@
 package com.jhony4lves.echo360.domain.integrity
 
-import com.jhony4lves.echo360.network.ftp.FtpRoute
-
 enum class IntegritySeverity(val rank: Int) {
     Info(0),
     Warning(1),
@@ -11,6 +9,11 @@ enum class IntegritySeverity(val rank: Int) {
 enum class IntegritySource {
     Snapshot,
     Remote,
+}
+
+enum class IntegrityRemoteRoute {
+    Fast,
+    Background,
 }
 
 data class IntegrityFinding(
@@ -28,7 +31,7 @@ data class EchoIntegrityReport(
     val checkedAtEpochMs: Long,
     val remoteAttempted: Boolean = false,
     val remoteVerified: Boolean = false,
-    val route: FtpRoute? = null,
+    val route: IntegrityRemoteRoute? = null,
     val remoteMessage: String? = null,
 ) {
     val errorCount: Int
@@ -49,7 +52,7 @@ data class EchoIntegrityReport(
     fun mergeRemote(
         remoteFindings: List<IntegrityFinding>,
         verified: Boolean,
-        route: FtpRoute?,
+        route: IntegrityRemoteRoute?,
         message: String?,
         checkedAtEpochMs: Long,
     ): EchoIntegrityReport = copy(
