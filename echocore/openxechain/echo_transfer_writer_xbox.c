@@ -12,10 +12,13 @@
 #define ECHO_PART_SUFFIX ".echo.part"
 #define ECHO_PART_SUFFIX_BYTES 10U
 
+/* Exact Xbox 360 X_FILE_RENAME_INFORMATION layout: 16 bytes on the wire. */
 typedef struct echo_file_rename_information {
     uint32_t replace_existing;
     uint32_t root_directory;
-    ANSI_STRING file_name;
+    uint16_t name_length;
+    uint16_t name_maximum_length;
+    uint32_t name_buffer;
 } echo_file_rename_information;
 
 _Static_assert(
@@ -30,11 +33,19 @@ static void echo_writer_zero(void *memory, size_t length) {
     for (i = 0U; i < length; ++i) bytes[i] = 0U;
 }
 
+static void echo_writer_prepare(echo_transfer_writer *writer) {
+    writer->file_handle = (HANDLE)0;
+    echo_transfer_reset(&writer->transfer);
+    echo_writer_zero(&writer->sha256, sizeof(writer->sha256));
+    echo_writer_zero(writer->final_native_path, sizeof(writer->final_native_path));
+    writer->opened = 0U;
+}
+
 static int echo_writer_digest_equal(
     const uint8_t left[ECHO_TRANSFER_SHA256_BYTES],
     const uint8_t right[ECHO_TRANSFER_SHA256_BYTES]
 ) {
-    uint8_t difference = 0U;
+    volatile uint8_t difference = 0U;
     uint32_t i;
     for (i = 0U; i < ECHO_TRANSFER_SHA256_BYTES; ++i) {
         difference = (uint8_t)(difference | (uint8_t)(left[i] ^ right[i]));
@@ -155,11 +166,12 @@ static int echo_writer_rehash_prefix(
 void echo_transfer_writer_reset(echo_transfer_writer *writer) {
     if (writer == NULL) return;
     echo_writer_zero(writer, sizeof(*writer));
+    writer->magic = ECHO_TRANSFER_WRITER_MAGIC;
     echo_transfer_reset(&writer->transfer);
 }
 
 void echo_transfer_writer_abort(echo_transfer_writer *writer) {
-    if (writer == NULL) return;
+    if (writer == NULL || writer->magic != ECHO_TRANSFER_WRITER_MAGIC) return;
     if (writer->opened != 0U && writer->file_handle != (HANDLE)0) {
         (void)NtClose(writer->file_handle);
     }
@@ -186,11 +198,15 @@ int echo_transfer_writer_open(
     int result;
 
     if (writer == NULL || canonical_final_path == NULL || transfer_id == 0U ||
-        resume_offset > total_bytes) {
+        resume_offset > total_bytes || total_bytes > (uint64_t)INT64_MAX) {
         return ECHO_WRITER_INVALID_ARGUMENT;
     }
+    if (writer->magic != ECHO_TRANSFER_WRITER_MAGIC || writer->opened != 0U ||
+        writer->transfer.active) {
+        return ECHO_WRITER_INVALID_STATE;
+    }
 
-    echo_transfer_writer_reset(writer);
+    echo_writer_prepare(writer);
     result = echo_writer_make_paths(
         writer,
         canonical_final_path,
@@ -271,7 +287,8 @@ int echo_transfer_writer_write_chunk(
     int64_t byte_offset;
     NTSTATUS status;
 
-    if (writer == NULL || writer->opened == 0U || data == NULL) {
+    if (writer == NULL || writer->magic != ECHO_TRANSFER_WRITER_MAGIC ||
+        writer->opened == 0U || data == NULL) {
         return ECHO_WRITER_INVALID_ARGUMENT;
     }
     if (data_bytes == 0U || data_bytes > ECHO_TRANSFER_CHUNK_MAX_BYTES ||
@@ -309,12 +326,14 @@ int echo_transfer_writer_finalize(
     const uint8_t expected_sha256[ECHO_TRANSFER_SHA256_BYTES]
 ) {
     uint8_t digest[ECHO_TRANSFER_SHA256_BYTES];
-    ANSI_STRING final_name;
     echo_file_rename_information rename_info;
     IO_STATUS_BLOCK io_status;
+    size_t final_name_length;
+    uintptr_t final_name_pointer;
     NTSTATUS status;
 
-    if (writer == NULL || expected_sha256 == NULL || writer->opened == 0U ||
+    if (writer == NULL || writer->magic != ECHO_TRANSFER_WRITER_MAGIC ||
+        expected_sha256 == NULL || writer->opened == 0U ||
         !echo_transfer_complete(&writer->transfer)) {
         return ECHO_WRITER_INVALID_STATE;
     }
@@ -335,11 +354,20 @@ int echo_transfer_writer_finalize(
     }
     echo_writer_zero(digest, sizeof(digest));
 
-    RtlInitAnsiString(&final_name, writer->final_native_path);
+    final_name_length = echo_cstr_length(writer->final_native_path);
+    final_name_pointer = (uintptr_t)writer->final_native_path;
+    if (final_name_length == 0U || final_name_length >= UINT16_MAX ||
+        final_name_pointer > UINT32_MAX) {
+        echo_transfer_writer_abort(writer);
+        return ECHO_WRITER_IO_ERROR;
+    }
+
     echo_writer_zero(&rename_info, sizeof(rename_info));
     rename_info.replace_existing = 0U;
     rename_info.root_directory = 0U;
-    rename_info.file_name = final_name;
+    rename_info.name_length = (uint16_t)final_name_length;
+    rename_info.name_maximum_length = (uint16_t)(final_name_length + 1U);
+    rename_info.name_buffer = (uint32_t)final_name_pointer;
     echo_writer_zero(&io_status, sizeof(io_status));
 
     status = NtSetInformationFile(
