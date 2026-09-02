@@ -87,14 +87,14 @@ static void test_valid_command_commits_counter_and_returns_body(void) {
     uint32_t envelope_length;
 
     make_secret(secret);
-    make_authenticated_state(&state, ECHO_CAP_READ_FILESYSTEM);
+    make_authenticated_state(&state, ECHO_AUTH_CAP_READ_FILESYSTEM);
     envelope_length = make_envelope(
         envelope, secret, &state, 2U, 0x14U, UINT32_C(0x11223344),
         body, (uint32_t)sizeof(body)
     );
 
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_FILESYSTEM, 0x14U, 0U,
+        secret, &state, ECHO_AUTH_CAP_READ_FILESYSTEM, 0x14U, 0U,
         UINT32_C(0x11223344), envelope, envelope_length,
         &body_out, &body_length_out
     ) == 0);
@@ -112,15 +112,15 @@ static void test_replay_is_rejected_before_mac_commit(void) {
     uint32_t envelope_length;
 
     make_secret(secret);
-    make_authenticated_state(&state, ECHO_CAP_READ_INFO);
+    make_authenticated_state(&state, ECHO_AUTH_CAP_READ_INFO);
     envelope_length = make_envelope(envelope, secret, &state, 2U, 0x10U, 7U, NULL, 0U);
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_INFO, 0x10U, 0U, 7U,
+        secret, &state, ECHO_AUTH_CAP_READ_INFO, 0x10U, 0U, 7U,
         envelope, envelope_length, &body_out, &body_length_out
     ) == 0);
     assert(state.last_rx_counter == 2U);
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_INFO, 0x10U, 0U, 7U,
+        secret, &state, ECHO_AUTH_CAP_READ_INFO, 0x10U, 0U, 7U,
         envelope, envelope_length, &body_out, &body_length_out
     ) == -3);
     assert(state.last_rx_counter == 2U);
@@ -140,12 +140,12 @@ static void assert_tamper_rejected(
     uint32_t envelope_length;
 
     make_secret(secret);
-    make_authenticated_state(&state, ECHO_CAP_READ_INFO);
+    make_authenticated_state(&state, ECHO_AUTH_CAP_READ_INFO);
     envelope_length = make_envelope(envelope, secret, &state, 2U, 0x10U, 9U, body, sizeof(body));
     if (mutate_body) envelope[ECHO_COMMAND_AUTH_PREFIX_BYTES + 1U] ^= 0x01U;
 
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_INFO, verify_type, 0U, verify_request_id,
+        secret, &state, ECHO_AUTH_CAP_READ_INFO, verify_type, 0U, verify_request_id,
         envelope, envelope_length, &body_out, &body_length_out
     ) == -4);
     assert(state.last_rx_counter == 1U);
@@ -164,11 +164,11 @@ static void test_type_request_id_body_and_mac_are_bound(void) {
     assert_tamper_rejected(0x10U, 9U, 1);
 
     make_secret(secret);
-    make_authenticated_state(&state, ECHO_CAP_READ_INFO);
+    make_authenticated_state(&state, ECHO_AUTH_CAP_READ_INFO);
     envelope_length = make_envelope(envelope, secret, &state, 2U, 0x10U, 9U, NULL, 0U);
     envelope[12U] ^= 0x80U;
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_INFO, 0x10U, 0U, 9U,
+        secret, &state, ECHO_AUTH_CAP_READ_INFO, 0x10U, 0U, 9U,
         envelope, envelope_length, &body_out, &body_length_out
     ) == -4);
     assert(state.last_rx_counter == 1U);
@@ -183,10 +183,10 @@ static void test_missing_capability_fails_without_consuming_counter(void) {
     uint32_t envelope_length;
 
     make_secret(secret);
-    make_authenticated_state(&state, ECHO_CAP_READ_INFO);
+    make_authenticated_state(&state, ECHO_AUTH_CAP_READ_INFO);
     envelope_length = make_envelope(envelope, secret, &state, 2U, 0x14U, 3U, NULL, 0U);
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_FILESYSTEM, 0x14U, 0U, 3U,
+        secret, &state, ECHO_AUTH_CAP_READ_FILESYSTEM, 0x14U, 0U, 3U,
         envelope, envelope_length, &body_out, &body_length_out
     ) == -1);
     assert(state.last_rx_counter == 1U);
@@ -200,13 +200,13 @@ static void test_zero_and_truncated_counters_fail_closed(void) {
     uint32_t body_length_out = 0U;
 
     make_secret(secret);
-    make_authenticated_state(&state, ECHO_CAP_READ_INFO);
+    make_authenticated_state(&state, ECHO_AUTH_CAP_READ_INFO);
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_INFO, 0x10U, 0U, 1U,
+        secret, &state, ECHO_AUTH_CAP_READ_INFO, 0x10U, 0U, 1U,
         envelope, sizeof(envelope), &body_out, &body_length_out
     ) == -2);
     assert(echo_command_auth_xbox_verify_and_commit(
-        secret, &state, ECHO_CAP_READ_INFO, 0x10U, 0U, 1U,
+        secret, &state, ECHO_AUTH_CAP_READ_INFO, 0x10U, 0U, 1U,
         envelope, ECHO_COMMAND_AUTH_PREFIX_BYTES - 1U,
         &body_out, &body_length_out
     ) == -2);
