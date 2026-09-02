@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../openxechain/echo_protocol.h"
 #include "../openxechain/echo_readonly_dispatch.h"
 
 #ifdef ECHO_CAP_READ_INFO
