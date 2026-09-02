@@ -2,7 +2,7 @@ package com.jhony4lves.echo360.domain.mods
 
 import com.jhony4lves.echo360.domain.sync.SaveVaultIntegrityReport
 import com.jhony4lves.echo360.domain.sync.SaveVaultManifest
-import com.jhony4lves.echo360.domain.xbox.XboxPath
+import com.jhony4lves.echo360.domain.sync.SaveVaultPathPolicy
 
 enum class RemoteMutationSafetyCode {
     Approved,
@@ -11,6 +11,7 @@ enum class RemoteMutationSafetyCode {
     RollbackSnapshotInvalid,
     RollbackSnapshotIncomplete,
     RollbackSnapshotHasExtras,
+    UnsafeTargetPath,
     TargetOutsideRollbackRoot,
 }
 
@@ -32,6 +33,14 @@ object RemoteMutationSafetyPolicy {
         rollbackManifest: SaveVaultManifest?,
         rollbackIntegrity: SaveVaultIntegrityReport?,
     ): RemoteMutationSafetyDecision {
+        val target = runCatching { SaveVaultPathPolicy.canonicalSourceRoot(targetCanonicalPath) }
+            .getOrElse {
+                return blocked(
+                    RemoteMutationSafetyCode.UnsafeTargetPath,
+                    "O alvo remoto não passou pela política segura Hdd1/Usb0 do Vault.",
+                )
+            }
+
         if (rollbackManifest == null || rollbackIntegrity == null) {
             return blocked(
                 RemoteMutationSafetyCode.MissingRollbackSnapshot,
@@ -63,8 +72,13 @@ object RemoteMutationSafetyPolicy {
             )
         }
 
-        val root = XboxPath.canonical(rollbackManifest.sourceRoot).trimEnd('/')
-        val target = XboxPath.canonical(targetCanonicalPath)
+        val root = runCatching { SaveVaultPathPolicy.canonicalSourceRoot(rollbackManifest.sourceRoot) }
+            .getOrElse {
+                return blocked(
+                    RemoteMutationSafetyCode.RollbackSnapshotInvalid,
+                    "A raiz do snapshot de rollback não passa pela política segura do Vault.",
+                )
+            }
         val inside = target.equals(root, ignoreCase = true) ||
             target.startsWith("$root/", ignoreCase = true)
         if (!inside) {
