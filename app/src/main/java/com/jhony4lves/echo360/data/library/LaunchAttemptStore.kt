@@ -3,14 +3,18 @@ package com.jhony4lves.echo360.data.library
 import android.content.Context
 import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.domain.library.LaunchAttempt
+import com.jhony4lves.echo360.domain.library.LaunchAttemptEngine
 import com.jhony4lves.echo360.domain.library.LaunchAttemptLedger
-import com.jhony4lves.echo360.domain.library.LaunchAttemptStatus
 import java.util.Base64
 import java.util.UUID
 
 class LaunchAttemptStore(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val engine = LaunchAttemptEngine(
+        confirmWindowMs = CONFIRM_WINDOW_MS,
+        maxAttempts = MAX_ATTEMPTS,
+    )
 
     @Synchronized
     fun load(): LaunchAttemptLedger = LaunchAttemptLedger(
@@ -30,13 +34,7 @@ class LaunchAttemptStore(context: Context) {
             title = game.title,
             requestedAtEpochMs = atEpochMs.coerceAtLeast(0L),
         )
-        persist(
-            LaunchAttemptLedger(
-                attempts = (listOf(attempt) + load().attempts)
-                    .distinctBy(LaunchAttempt::id)
-                    .take(MAX_ATTEMPTS),
-            ),
-        )
+        persist(engine.prepend(load(), attempt))
         return attempt
     }
 
@@ -44,47 +42,34 @@ class LaunchAttemptStore(context: Context) {
     fun markAccepted(
         id: String,
         atEpochMs: Long = System.currentTimeMillis(),
-    ): LaunchAttempt? = update(id) { current ->
-        if (current.status == LaunchAttemptStatus.Rejected) current
-        else current.copy(
-            acceptedAtEpochMs = atEpochMs.coerceAtLeast(current.requestedAtEpochMs),
-            rejectedAtEpochMs = null,
-            rejectionReason = null,
-        )
-    }
+    ): LaunchAttempt? = persistIfChanged(
+        before = load(),
+        after = { ledger -> engine.markAccepted(ledger, id, atEpochMs) },
+        id = id,
+    )
 
     @Synchronized
     fun markRejected(
         id: String,
         reason: String?,
         atEpochMs: Long = System.currentTimeMillis(),
-    ): LaunchAttempt? = update(id) { current ->
-        current.copy(
-            rejectedAtEpochMs = atEpochMs.coerceAtLeast(current.requestedAtEpochMs),
-            rejectionReason = sanitize(reason),
-            confirmedAtEpochMs = null,
-        )
-    }
+    ): LaunchAttempt? = persistIfChanged(
+        before = load(),
+        after = { ledger -> engine.markRejected(ledger, id, sanitize(reason), atEpochMs) },
+        id = id,
+    )
 
     @Synchronized
     fun confirmObserved(
         game: GameEntry,
         atEpochMs: Long = System.currentTimeMillis(),
     ): LaunchAttempt? {
-        val ledger = load()
-        val candidate = ledger.attempts.firstOrNull { attempt ->
-            val accepted = attempt.acceptedAtEpochMs
-            attempt.titleId == game.titleId &&
-                attempt.status == LaunchAttemptStatus.Accepted &&
-                accepted != null &&
-                atEpochMs >= accepted &&
-                atEpochMs - accepted <= CONFIRM_WINDOW_MS
-        } ?: return null
-
-        return update(candidate.id) { current ->
-            current.copy(
-                confirmedAtEpochMs = atEpochMs.coerceAtLeast(current.acceptedAtEpochMs ?: current.requestedAtEpochMs),
-            )
+        val before = load()
+        val after = engine.confirmObserved(before, game.titleId, atEpochMs)
+        if (after == before) return null
+        persist(after)
+        return after.attempts.firstOrNull { next ->
+            before.attempts.firstOrNull { it.id == next.id } != next && next.titleId == game.titleId
         }
     }
 
@@ -107,15 +92,15 @@ class LaunchAttemptStore(context: Context) {
         prefs.edit().remove(KEY_LEDGER).apply()
     }
 
-    private fun update(id: String, transform: (LaunchAttempt) -> LaunchAttempt): LaunchAttempt? {
-        val ledger = load()
-        var updated: LaunchAttempt? = null
-        val next = ledger.attempts.map { current ->
-            if (current.id != id) current
-            else transform(current).also { updated = it }
-        }
-        if (updated != null) persist(LaunchAttemptLedger(next))
-        return updated
+    private fun persistIfChanged(
+        before: LaunchAttemptLedger,
+        after: (LaunchAttemptLedger) -> LaunchAttemptLedger,
+        id: String,
+    ): LaunchAttempt? {
+        val next = after(before)
+        if (next == before) return before.attempts.firstOrNull { it.id == id }
+        persist(next)
+        return next.attempts.firstOrNull { it.id == id }
     }
 
     private fun persist(ledger: LaunchAttemptLedger) {
