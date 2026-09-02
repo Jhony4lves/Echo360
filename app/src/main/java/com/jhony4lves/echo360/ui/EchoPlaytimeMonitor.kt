@@ -14,8 +14,10 @@ import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
 import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.domain.library.matchObservedGame
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -44,12 +46,28 @@ internal fun EchoPlaytimeMonitor() {
                 while (coroutineContext.isActive) {
                     val cycleStartedAt = System.currentTimeMillis()
                     if (games.isEmpty() || cycleStartedAt >= refreshCatalogAt) {
-                        games = runCatching { libraryRepository.loadCached()?.games.orEmpty() }
-                            .getOrDefault(games)
+                        games = try {
+                            libraryRepository.loadCached()?.games.orEmpty()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Throwable) {
+                            games
+                        }
                         refreshCatalogAt = cycleStartedAt + CATALOG_REFRESH_MS
                     }
 
-                    if (configStore.load() == null) {
+                    val configured = withContext(Dispatchers.IO) {
+                        configStore.load() != null
+                    }
+                    if (!configured) {
+                        withContext(Dispatchers.IO) { playSessionStore.stopObserving() }
+                        delay(OFFLINE_SAMPLE_MS)
+                        continue
+                    }
+
+                    if (games.isEmpty()) {
+                        // Without a catalog mapping we cannot identify a game honestly.
+                        withContext(Dispatchers.IO) { playSessionStore.stopObserving() }
                         delay(OFFLINE_SAMPLE_MS)
                         continue
                     }
@@ -70,19 +88,21 @@ internal fun EchoPlaytimeMonitor() {
 
                     val observedAt = System.currentTimeMillis()
                     val game = matchObservedGame(games, nowPlaying)
-                    if (game != null) {
-                        playSessionStore.observe(game, observedAt)
-                        playerStore.markSeen(game, observedAt)
-                    } else if (games.isNotEmpty()) {
-                        // NOVA answered, but the active title is not one of the cached games.
-                        playSessionStore.observeNonGame(observedAt)
+                    withContext(Dispatchers.IO) {
+                        if (game != null) {
+                            playSessionStore.observe(game, observedAt)
+                            playerStore.markSeen(game, observedAt)
+                        } else {
+                            // NOVA answered, but the active title is not one of the cached games.
+                            playSessionStore.observeNonGame(observedAt)
+                        }
                     }
 
                     delay(ONLINE_SAMPLE_MS)
                 }
             } finally {
                 // repeatOnLifecycle cancels this block when the app leaves STARTED.
-                playSessionStore.stopObserving()
+                withContext(Dispatchers.IO) { playSessionStore.stopObserving() }
             }
         }
     }
