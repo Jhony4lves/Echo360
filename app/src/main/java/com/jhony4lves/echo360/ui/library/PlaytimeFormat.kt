@@ -12,9 +12,3 @@ internal fun formatObservedDuration(durationMs: Long): String {
         else -> "${minutes} min"
     }
 }
-
-internal fun formatObservedSessionCount(count: Int): String = when (count) {
-    0 -> "nenhuma sessão"
-    1 -> "1 sessão"
-    else -> "$count sessões"
-}
