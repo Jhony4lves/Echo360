@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:label="Echo360 Convert Test"
         android:icon="@drawable/ic_echo_convert_test"
-        android:roundIcon="@drawable/ic_echo_convert_test" />
+        android:roundIcon="@drawable/ic_echo_convert_test"
+        tools:replace="android:label,android:icon,android:roundIcon" />
 </manifest>
