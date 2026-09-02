@@ -39,6 +39,23 @@ int main(void) {
         assert(state.challenge[i] == challenge_a[i]);
     }
 
+    /*
+     * Regression: beginning a new session with state.challenge itself as the
+     * source must snapshot before session_end() scrubs the old state.
+     */
+    assert(echo_auth_session_begin(
+        &state,
+        UINT64_C(0x8877665544332211),
+        state.challenge
+    ) == 0);
+    assert(state.session_id == UINT64_C(0x8877665544332211));
+    for (i = 0U; i < ECHO_AUTH_CHALLENGE_BYTES; ++i) {
+        assert(state.challenge[i] == challenge_a[i]);
+    }
+
+    /* Restore the original fixture session for the remaining policy checks. */
+    assert(echo_auth_session_begin(&state, UINT64_C(0x1122334455667788), challenge_a) == 0);
+
     assert(echo_auth_has_capability(&state, ECHO_CAP_PING) == 1);
     assert(echo_auth_has_capability(&state, ECHO_CAP_READ_INFO) == 0);
     assert(echo_auth_has_capability(&state, UINT64_C(0)) == 0);
