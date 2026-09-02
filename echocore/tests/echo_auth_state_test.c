@@ -18,6 +18,7 @@ int main(void) {
     uint8_t challenge_a[ECHO_AUTH_CHALLENGE_BYTES];
     uint8_t challenge_b[ECHO_AUTH_CHALLENGE_BYTES];
     uint32_t i;
+    const uint64_t unknown_capability = UINT64_C(1) << 63;
 
     echo_auth_session_end(&state);
     for (i = 0U; i < ECHO_AUTH_CHALLENGE_BYTES; ++i) {
@@ -41,9 +42,13 @@ int main(void) {
     assert(echo_auth_has_capability(&state, ECHO_CAP_PING) == 1);
     assert(echo_auth_has_capability(&state, ECHO_CAP_READ_INFO) == 0);
     assert(echo_auth_has_capability(&state, UINT64_C(0)) == 0);
+    assert(echo_auth_has_capability(&state, unknown_capability) == 0);
 
     assert(echo_auth_mark_authenticated((echo_auth_state *)0, UINT64_C(1), ECHO_CAP_READ_INFO) == -1);
     assert(echo_auth_mark_authenticated(&state, UINT64_C(0), ECHO_CAP_READ_INFO) == -1);
+    assert(echo_auth_mark_authenticated(&state, UINT64_C(1), unknown_capability) == -1);
+    assert(state.authenticated == 0U);
+    assert(state.challenge_active == 1U);
 
     assert(echo_auth_mark_authenticated(
         &state,
