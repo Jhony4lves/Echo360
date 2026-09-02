@@ -17,11 +17,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.ui.sync.EchoSaveVaultScreen
+import com.jhony4lves.echo360.ui.sync.EchoVaultIntegrityScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
 
 private enum class EchoFilesMode(val label: String) {
     Transfer("TRANSFER"),
     Vault("SAVE VAULT"),
+    Verify("VERIFY"),
 }
 
 @Composable
@@ -60,6 +62,11 @@ fun EchoFilesHubScreen(modifier: Modifier = Modifier) {
                     .fillMaxWidth()
                     .weight(1f),
                 onBackToTransfer = { mode = EchoFilesMode.Transfer },
+            )
+            EchoFilesMode.Verify -> EchoVaultIntegrityScreen(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             )
         }
     }
