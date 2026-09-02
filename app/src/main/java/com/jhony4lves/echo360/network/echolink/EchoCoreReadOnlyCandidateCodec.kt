@@ -215,15 +215,16 @@ internal object EchoCoreReadOnlyCandidateCodec {
         if (segments.isEmpty() || !segments.first().equals("Hdd1", ignoreCase = true)) {
             fail("EchoCore v1 only accepts canonical /Hdd1 paths")
         }
-        if (segments.size < 2) {
-            fail("EchoCore v1 C path policy requires an explicit child below /Hdd1")
-        }
         segments.forEachIndexed { index, segment ->
             if (segment == "." || segment == "..") fail("EchoCore path traversal is forbidden")
             if (segment.contains(':')) fail("EchoCore path segment contains ':' at index $index")
         }
 
-        val wire = "Hdd1:/" + segments.drop(1).joinToString("/")
+        val wire = if (segments.size == 1) {
+            "Hdd1:"
+        } else {
+            "Hdd1:/" + segments.drop(1).joinToString("/")
+        }
         val bytes = wire.toByteArray(Charsets.UTF_8)
         if (bytes.isEmpty() || bytes.size > MAX_PATH_BYTES || bytes.any { it == 0.toByte() }) {
             fail("EchoCore path payload length/content is invalid")
