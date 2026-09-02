@@ -18,6 +18,7 @@ permissions:
 env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot-fast
+  OPENXECHAIN_CACHE_KEY: echocore-openxechain-fast-v2-Linux-eed1fa65bf9577fd31625764b320a90182ea9ade-cmake-3.31.10
 
 jobs:
   build:
@@ -45,10 +46,10 @@ jobs:
 
       - name: Restore component-only OpenXeChain cache
         id: toolchain-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.OPENXECHAIN_SYSROOT }}
-          key: echocore-openxechain-fast-v1-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
 
       - name: Clone pinned OpenXeChain sources
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
@@ -72,6 +73,16 @@ jobs:
           set -o pipefail
           bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain \
             2>&1 | tee -a /tmp/echocore-fast-toolchain.log
+
+      # Save immediately after the expensive toolchain succeeds. This is
+      # intentionally not deferred to a post-job hook: a later EchoCore or
+      # plugin-link failure must not throw away an ~80 minute LLVM build.
+      - name: Save proven component-only OpenXeChain cache
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.OPENXECHAIN_SYSROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
 
       - name: Upload fast toolchain log
         if: always() && steps.toolchain-cache.outputs.cache-hit != 'true'
