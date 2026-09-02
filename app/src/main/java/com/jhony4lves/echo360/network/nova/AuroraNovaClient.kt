@@ -26,10 +26,11 @@ import java.util.UUID
 /**
  * Safe authenticated subset of Aurora NOVA.
  *
- * This client exposes runtime title/launch operations plus non-identity
- * DashLaunch, RAM and temperature snapshots used by EchoDoctor. It
- * intentionally does not request /system, CPU/DVD keys, serials, console IDs,
- * or other identity material. JWTs live only in process memory.
+ * This client exposes runtime title/launch operations, documented bounded
+ * remote actions, plus non-identity DashLaunch, RAM and temperature snapshots
+ * used by EchoDoctor. It intentionally does not request /system, CPU/DVD keys,
+ * serials, console IDs, or other identity material. JWTs live only in process
+ * memory.
  */
 class AuroraNovaClient(
     private val tcpProbe: TcpPortProbe = TcpPortProbe(),
@@ -56,6 +57,39 @@ class AuroraNovaClient(
 
     suspend fun doctorTemperature(profile: XboxProfile): DoctorTemperatureSnapshot = withContext(Dispatchers.IO) {
         parseDoctorTemperature(authenticatedJsonGet(profile, "/temperature"))
+    }
+
+    /**
+     * NOVA 0.7b.2 r1622 documents POST /thread/state with suspend=1/0.
+     * This deliberately exposes only the boolean main-thread state instead of
+     * a generic arbitrary NOVA POST surface.
+     */
+    suspend fun setMainThreadSuspended(
+        profile: XboxProfile,
+        suspended: Boolean,
+    ) = withContext(Dispatchers.IO) {
+        val response = authenticatedMultipartPost(
+            profile = profile,
+            path = "/thread/state",
+            fields = linkedMapOf("suspend" to if (suspended) "1" else "0"),
+            retryAuth = true,
+        )
+        if (response.code != 202) {
+            throw NovaHttpException(
+                response.code,
+                response.body.ifBlank { "NOVA recusou a alteração do estado da thread principal." },
+            )
+        }
+    }
+
+    /**
+     * NOVA documents GET /screencapture/meta as the operation that takes a
+     * screenshot. The response is intentionally ignored here; EchoRemote only
+     * needs acknowledgement and never deletes screenshots automatically.
+     */
+    suspend fun takeScreenshot(profile: XboxProfile) = withContext(Dispatchers.IO) {
+        authenticatedJsonGet(profile, "/screencapture/meta")
+        Unit
     }
 
     suspend fun launch(
