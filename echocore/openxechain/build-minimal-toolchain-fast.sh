@@ -20,10 +20,11 @@ for required in "${ROOT}/llvm/llvm" "${ROOT}/xecorelib" "${ROOT}/synthxex"; do
 done
 
 # Only parent components with real install targets belong in an LLVM
-# distribution. lld-link is installed as a symlink of lld; llvm-dlltool is a
-# symlink of llvm-ar. Naming those aliases as distribution components makes
-# LLVMDistributionSupport fail during configure because they intentionally do
-# not have independent install targets.
+# distribution. lld-link is installed as a symlink of lld. llvm-dlltool is
+# implemented by llvm-ar and normally installed as an alias, but that alias is
+# not materialized by install-distribution when only the parent llvm-ar
+# component is selected. Keep llvm-ar as the distribution component and create
+# the canonical argv[0]-dispatch alias explicitly after installation.
 LLVM_COMPONENTS="clang;clang-resource-headers;lld;llvm-ar"
 
 rm -rf "${LLVM_BUILD}" "${XECORE_BUILD}" "${SYNTH_BUILD}"
@@ -51,8 +52,16 @@ cmake \
 cmake --build "${LLVM_BUILD}" --target distribution --parallel "${PARALLEL}"
 cmake --build "${LLVM_BUILD}" --target install-distribution --parallel "${PARALLEL}"
 
-# Parent installs must have materialized the aliases EchoCore/xecorelib need.
-# Fail here, before writing a cache, if LLVM's symlink install semantics change.
+# llvm-dlltool and llvm-ar are the same multiplexer binary selected by argv[0].
+# The normal full LLVM install creates this symlink for us. The restricted
+# distribution install above installs llvm-ar but omits the alias, so recreate
+# exactly that upstream relationship instead of compiling a second tool.
+if [[ ! -e "${PREFIX}/bin/llvm-dlltool" ]]; then
+  ln -s llvm-ar "${PREFIX}/bin/llvm-dlltool"
+fi
+
+# Parent installs must have materialized every executable EchoCore/xecorelib
+# needs. Fail here, before xecorelib, if LLVM's install semantics change again.
 for binary in clang lld lld-link llvm-ar llvm-dlltool; do
   if [[ ! -x "${PREFIX}/bin/${binary}" ]]; then
     echo "EchoCore fast toolchain: expected LLVM tool missing: ${binary}" >&2
@@ -87,6 +96,9 @@ EOF
   "${LLVM_BUILD}/echocore-asm-smoke.s" \
   -o "${LLVM_BUILD}/echocore-asm-smoke.o"
 test -s "${LLVM_BUILD}/echocore-asm-smoke.o"
+
+# Prove the alias dispatches to llvm-dlltool before asking xecorelib to use it.
+"${PREFIX}/bin/llvm-dlltool" --version >/dev/null
 
 (
   cd "${XECORE_BUILD}"
