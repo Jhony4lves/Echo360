@@ -54,6 +54,14 @@ class PlaySessionStore(context: Context) {
     }
 
     @Synchronized
+    fun stopObserving(): PlaySessionLedger {
+        val current = load()
+        val next = engine.stopObserving(current)
+        if (next != current) persist(next)
+        return next
+    }
+
+    @Synchronized
     fun summaryFor(game: GameEntry, recentLimit: Int = 6): PlaytimeSummary =
         engine.summaryFor(load(), game.stableKey, recentLimit)
 
