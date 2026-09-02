@@ -15,11 +15,10 @@
 #define ECHO_CAP_LAUNCH           (UINT64_C(1) << 4)
 #define ECHO_CAP_SYSTEM_CONTROL   (UINT64_C(1) << 5)
 #define ECHO_CAP_PATCH            (UINT64_C(1) << 6)
-#define ECHO_CAP_ALL (
-    ECHO_CAP_PING | ECHO_CAP_READ_INFO | ECHO_CAP_READ_FILESYSTEM | \
-    ECHO_CAP_WRITE_FILESYSTEM | ECHO_CAP_LAUNCH | ECHO_CAP_SYSTEM_CONTROL | \
-    ECHO_CAP_PATCH
-)
+#define ECHO_CAP_ALL \
+    (ECHO_CAP_PING | ECHO_CAP_READ_INFO | ECHO_CAP_READ_FILESYSTEM | \
+     ECHO_CAP_WRITE_FILESYSTEM | ECHO_CAP_LAUNCH | ECHO_CAP_SYSTEM_CONTROL | \
+     ECHO_CAP_PATCH)
 
 /*
  * Authentication policy state only.
@@ -39,32 +38,26 @@ typedef struct echo_auth_state {
     uint8_t authenticated;
 } echo_auth_state;
 
-/*
- * Keep these byte operations explicit for the freestanding Xbox build. The
- * volatile accesses prevent an optimizer from replacing the tiny loops with an
- * implicit memset/memcpy dependency that would defeat -nostdlib linkage.
- */
-static void echo_auth_zero_bytes(volatile uint8_t *bytes, size_t length) {
+static void echo_auth_zero_bytes(uint8_t *bytes, size_t length) {
+    volatile uint8_t *volatile_bytes = (volatile uint8_t *)bytes;
     size_t i;
-    if (bytes == NULL) {
+    if (volatile_bytes == NULL) {
         return;
     }
     for (i = 0U; i < length; ++i) {
-        bytes[i] = 0U;
+        volatile_bytes[i] = 0U;
     }
 }
 
-static void echo_auth_copy_bytes(
-    volatile uint8_t *dest,
-    const volatile uint8_t *src,
-    size_t length
-) {
+static void echo_auth_copy_bytes(uint8_t *dest, const uint8_t *src, size_t length) {
+    volatile uint8_t *volatile_dest = (volatile uint8_t *)dest;
+    const volatile uint8_t *volatile_src = (const volatile uint8_t *)src;
     size_t i;
-    if (dest == NULL || src == NULL) {
+    if (volatile_dest == NULL || volatile_src == NULL) {
         return;
     }
     for (i = 0U; i < length; ++i) {
-        dest[i] = src[i];
+        volatile_dest[i] = volatile_src[i];
     }
 }
 
@@ -92,25 +85,11 @@ static int echo_auth_session_begin(
         return -1;
     }
 
-    /*
-     * Snapshot first because callers are allowed to generate a fresh challenge
-     * directly into state->challenge. session_end() intentionally scrubs that
-     * storage, so copying only afterwards would turn an aliased challenge into
-     * sixteen zero bytes.
-     */
-    echo_auth_copy_bytes(
-        challenge_snapshot,
-        challenge,
-        ECHO_AUTH_CHALLENGE_BYTES
-    );
-
+    /* Snapshot before clearing state so state->challenge is safe as input. */
+    echo_auth_copy_bytes(challenge_snapshot, challenge, ECHO_AUTH_CHALLENGE_BYTES);
     echo_auth_session_end(state);
     state->session_id = session_id;
-    echo_auth_copy_bytes(
-        state->challenge,
-        challenge_snapshot,
-        ECHO_AUTH_CHALLENGE_BYTES
-    );
+    echo_auth_copy_bytes(state->challenge, challenge_snapshot, ECHO_AUTH_CHALLENGE_BYTES);
     echo_auth_zero_bytes(challenge_snapshot, ECHO_AUTH_CHALLENGE_BYTES);
     state->challenge_active = 1U;
     return 0;
