@@ -39,10 +39,6 @@ int main(void) {
         assert(state.challenge[i] == challenge_a[i]);
     }
 
-    /*
-     * Regression: beginning a new session with state.challenge itself as the
-     * source must snapshot before session_end() scrubs the old state.
-     */
     assert(echo_auth_session_begin(
         &state,
         UINT64_C(0x8877665544332211),
@@ -53,16 +49,15 @@ int main(void) {
         assert(state.challenge[i] == challenge_a[i]);
     }
 
-    /* Restore the original fixture session for the remaining policy checks. */
     assert(echo_auth_session_begin(&state, UINT64_C(0x1122334455667788), challenge_a) == 0);
 
-    assert(echo_auth_has_capability(&state, ECHO_CAP_PING) == 1);
-    assert(echo_auth_has_capability(&state, ECHO_CAP_READ_INFO) == 0);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_PING) == 1);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_READ_INFO) == 0);
     assert(echo_auth_has_capability(&state, UINT64_C(0)) == 0);
     assert(echo_auth_has_capability(&state, unknown_capability) == 0);
 
-    assert(echo_auth_mark_authenticated((echo_auth_state *)0, UINT64_C(1), ECHO_CAP_READ_INFO) == -1);
-    assert(echo_auth_mark_authenticated(&state, UINT64_C(0), ECHO_CAP_READ_INFO) == -1);
+    assert(echo_auth_mark_authenticated((echo_auth_state *)0, UINT64_C(1), ECHO_AUTH_CAP_READ_INFO) == -1);
+    assert(echo_auth_mark_authenticated(&state, UINT64_C(0), ECHO_AUTH_CAP_READ_INFO) == -1);
     assert(echo_auth_mark_authenticated(&state, UINT64_C(1), unknown_capability) == -1);
     assert(state.authenticated == 0U);
     assert(state.challenge_active == 1U);
@@ -70,17 +65,17 @@ int main(void) {
     assert(echo_auth_mark_authenticated(
         &state,
         UINT64_C(5),
-        ECHO_CAP_READ_INFO | ECHO_CAP_READ_FILESYSTEM
+        ECHO_AUTH_CAP_READ_INFO | ECHO_AUTH_CAP_READ_FILESYSTEM
     ) == 0);
     assert(state.authenticated == 1U);
     assert(state.challenge_active == 0U);
     assert(bytes_are_zero(state.challenge, ECHO_AUTH_CHALLENGE_BYTES) == 1);
     assert(state.last_rx_counter == UINT64_C(5));
-    assert(echo_auth_has_capability(&state, ECHO_CAP_PING) == 1);
-    assert(echo_auth_has_capability(&state, ECHO_CAP_READ_INFO) == 1);
-    assert(echo_auth_has_capability(&state, ECHO_CAP_READ_FILESYSTEM) == 1);
-    assert(echo_auth_has_capability(&state, ECHO_CAP_WRITE_FILESYSTEM) == 0);
-    assert(echo_auth_mark_authenticated(&state, UINT64_C(6), ECHO_CAP_WRITE_FILESYSTEM) == -1);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_PING) == 1);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_READ_INFO) == 1);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_READ_FILESYSTEM) == 1);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_WRITE_FILESYSTEM) == 0);
+    assert(echo_auth_mark_authenticated(&state, UINT64_C(6), ECHO_AUTH_CAP_WRITE_FILESYSTEM) == -1);
 
     assert(echo_auth_commit_counter(&state, UINT64_C(0)) == -1);
     assert(echo_auth_commit_counter(&state, UINT64_C(5)) == -1);
@@ -93,12 +88,12 @@ int main(void) {
     assert(state.session_id == UINT64_C(2));
     assert(state.authenticated == 0U);
     assert(state.last_rx_counter == UINT64_C(0));
-    assert(echo_auth_has_capability(&state, ECHO_CAP_READ_INFO) == 0);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_READ_INFO) == 0);
     assert(echo_auth_commit_counter(&state, UINT64_C(1)) == -1);
 
-    assert(echo_auth_mark_authenticated(&state, UINT64_MAX, ECHO_CAP_WRITE_FILESYSTEM) == 0);
+    assert(echo_auth_mark_authenticated(&state, UINT64_MAX, ECHO_AUTH_CAP_WRITE_FILESYSTEM) == 0);
     assert(state.last_rx_counter == UINT64_MAX);
-    assert(echo_auth_has_capability(&state, ECHO_CAP_WRITE_FILESYSTEM) == 1);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_WRITE_FILESYSTEM) == 1);
     assert(echo_auth_commit_counter(&state, UINT64_C(1)) == -1);
     assert(echo_auth_commit_counter(&state, UINT64_MAX) == -1);
 
@@ -108,12 +103,12 @@ int main(void) {
     assert(state.authenticated == 0U);
     assert(state.challenge_active == 0U);
     assert(bytes_are_zero(state.challenge, ECHO_AUTH_CHALLENGE_BYTES) == 1);
-    assert(echo_auth_has_capability(&state, ECHO_CAP_PING) == 1);
-    assert(echo_auth_has_capability(&state, ECHO_CAP_WRITE_FILESYSTEM) == 0);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_PING) == 1);
+    assert(echo_auth_has_capability(&state, ECHO_AUTH_CAP_WRITE_FILESYSTEM) == 0);
 
     echo_auth_session_end((echo_auth_state *)0);
     assert(echo_auth_commit_counter((echo_auth_state *)0, UINT64_C(1)) == -1);
-    assert(echo_auth_has_capability((const echo_auth_state *)0, ECHO_CAP_PING) == 0);
+    assert(echo_auth_has_capability((const echo_auth_state *)0, ECHO_AUTH_CAP_PING) == 0);
 
     return 0;
 }
