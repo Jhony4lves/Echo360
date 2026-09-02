@@ -8,6 +8,7 @@ import com.jhony4lves.echo360.domain.library.LibrarySnapshot
 import com.jhony4lves.echo360.network.ftp.FtpRoute
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -181,14 +182,19 @@ class AuroraArtworkRepository(
     ): ArtworkFetchResult {
         coroutineContext.ensureActive()
         val remotePath = AuroraArtworkPaths.backgroundAsset(snapshot.auroraRoot, game)
-        val remoteBytes = runCatching { session.size(remotePath) }.getOrNull()
-            ?: return ArtworkFetchResult(
-                status = ArtworkFetchStatus.Unavailable,
-                file = null,
-                remoteBytes = null,
-                route = route,
-                message = "Aurora não informou tamanho para o background de ${game.title}.",
-            )
+        val remoteBytes = try {
+            session.size(remotePath)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        } ?: return ArtworkFetchResult(
+            status = ArtworkFetchStatus.Unavailable,
+            file = null,
+            remoteBytes = null,
+            route = route,
+            message = "Aurora não informou tamanho para o background de ${game.title}.",
+        )
 
         if (remoteBytes <= 0L) {
             return ArtworkFetchResult(
@@ -222,12 +228,14 @@ class AuroraArtworkRepository(
             )
         }
 
-        val outcome = runCatching {
-            val temp = File(backgroundRawDir, "${AuroraArtworkPaths.cacheStem(game)}.tmp")
-            if (temp.exists()) temp.delete()
+        val temp = File(backgroundRawDir, "${AuroraArtworkPaths.cacheStem(game)}.tmp")
+        if (temp.exists()) temp.delete()
+
+        return try {
             FileOutputStream(temp).use { output ->
                 session.download(remotePath, output)
             }
+            coroutineContext.ensureActive()
             require(temp.length() == remoteBytes) {
                 "Background incompleto: ${temp.length()} de $remoteBytes bytes."
             }
@@ -238,29 +246,27 @@ class AuroraArtworkRepository(
 
             if (rawFile.exists()) rawFile.delete()
             require(temp.renameTo(rawFile)) { "Não foi possível promover o cache RXEA do background." }
-            pngFile
-        }
 
-        return outcome.fold(
-            onSuccess = { file ->
-                ArtworkFetchResult(
-                    status = ArtworkFetchStatus.Downloaded,
-                    file = file,
-                    remoteBytes = remoteBytes,
-                    route = route,
-                    message = "Background de ${game.title} salvo no cache local.",
-                )
-            },
-            onFailure = { error ->
-                ArtworkFetchResult(
-                    status = ArtworkFetchStatus.Failed,
-                    file = null,
-                    remoteBytes = remoteBytes,
-                    route = route,
-                    message = error.message ?: "Falha ao decodificar o background do Aurora.",
-                )
-            },
-        )
+            ArtworkFetchResult(
+                status = ArtworkFetchStatus.Downloaded,
+                file = pngFile,
+                remoteBytes = remoteBytes,
+                route = route,
+                message = "Background de ${game.title} salvo no cache local.",
+            )
+        } catch (cancelled: CancellationException) {
+            temp.delete()
+            throw cancelled
+        } catch (error: Throwable) {
+            temp.delete()
+            ArtworkFetchResult(
+                status = ArtworkFetchStatus.Failed,
+                file = null,
+                remoteBytes = remoteBytes,
+                route = route,
+                message = error.message ?: "Falha ao decodificar o background do Aurora.",
+            )
+        }
     }
 
     private fun persistPng(decoded: DecodedRxeaImage, destination: File) {
