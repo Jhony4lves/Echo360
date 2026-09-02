@@ -12,18 +12,18 @@ import com.jhony4lves.echo360.network.nova.AuroraNovaClient
  * EchoCore provider can implement this interface later without changing the
  * Doctor analyzer or UI. No setter/mutation operation belongs in this contract.
  */
-internal interface DashLaunchDoctorSource {
+interface DashLaunchDoctorSource {
     val origin: DashLaunchDoctorOrigin
 
     suspend fun read(profile: XboxProfile): DashLaunchSnapshot
 }
 
-internal enum class DashLaunchDoctorOrigin {
+enum class DashLaunchDoctorOrigin {
     NovaCompatibility,
     EchoCore,
 }
 
-internal class NovaDashLaunchDoctorSource(
+class NovaDashLaunchDoctorSource(
     private val novaClient: AuroraNovaClient = AuroraNovaClient(),
 ) : DashLaunchDoctorSource {
     override val origin: DashLaunchDoctorOrigin = DashLaunchDoctorOrigin.NovaCompatibility
