@@ -134,10 +134,10 @@ internal class RemoteGameIntegrityProbe {
             else -> resultWithFinding(
                 game = game,
                 code = CODE_DIRECTORY_UNREADABLE,
-                severity = IntegritySeverity.Warning,
-                title = "Diretório remoto não pôde ser confirmado",
+                severity = IntegritySeverity.Info,
+                title = "Verificação remota inconclusiva",
                 evidence = "LIST falhou em ${game.canonicalDirectory}: ${safeError(listError)}; SIZE também não confirmou o executável.",
-                action = "Verifique conexão/rota FTP e tente novamente. Não trate esta falha de transporte como arquivo ausente.",
+                action = "Verifique conexão/rota FTP e tente novamente. Não trate esta falha de transporte como problema do jogo.",
                 message = "A verificação remota ficou inconclusiva por falha de acesso ao diretório.",
             )
         }
