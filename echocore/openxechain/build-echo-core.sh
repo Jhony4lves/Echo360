@@ -9,6 +9,8 @@ CLANG="${SYSROOT}/bin/clang"
 SYNTHXEX="${SYSROOT}/bin/synthxex"
 PE="${OUT_DIR}/EchoCore.pe"
 XEX="${OUT_DIR}/EchoCore.xex"
+OBJ="${OUT_DIR}/EchoCore.o"
+ASM="${OUT_DIR}/EchoCore.s"
 
 if [[ ! -x "${CLANG}" ]]; then
   echo "EchoCore build: missing OpenXeChain clang at ${CLANG}" >&2
@@ -28,21 +30,37 @@ if [[ ! -f "${SOURCE}" ]]; then
 fi
 
 mkdir -p "${OUT_DIR}"
-rm -f "${PE}" "${XEX}"
+rm -f "${PE}" "${XEX}" "${OBJ}" "${ASM}"
+
+COMMON_FLAGS=(
+  -std=c11
+  -Os
+  -ffreestanding
+  -fno-builtin
+  -nostdlib
+  -ffunction-sections
+  -fdata-sections
+  -Wall
+  -Wextra
+  -Werror
+)
+
+# Keep a tiny symbol probe while the open-source Xbox/COFF backend is being
+# validated. It makes ABI/name-decoration failures observable in CI instead of
+# guessing linker entrypoint spellings.
+"${CLANG}" "${COMMON_FLAGS[@]}" -c "${SOURCE}" -o "${OBJ}"
+"${CLANG}" "${COMMON_FLAGS[@]}" -S "${SOURCE}" -o "${ASM}"
+echo "=== EchoCore object symbols ==="
+if command -v nm >/dev/null 2>&1; then
+  nm -a "${OBJ}" || true
+fi
+echo "=== EchoCore assembly labels/calls ==="
+grep -E '(^|[[:space:]])([._]*start|[._]*echo_accept_bounded|[._]*echo_handle_ping)(:|$|[[:space:]])' "${ASM}" || true
 
 # The bootstrap is intentionally freestanding. It uses no Newlib/libc and no
 # compiler runtime helpers; Xbox OS imports are resolved only through xecorelib.
 "${CLANG}" \
-  -std=c11 \
-  -Os \
-  -ffreestanding \
-  -fno-builtin \
-  -nostdlib \
-  -ffunction-sections \
-  -fdata-sections \
-  -Wall \
-  -Wextra \
-  -Werror \
+  "${COMMON_FLAGS[@]}" \
   "${SOURCE}" \
   -Wl,/libpath:"${SYSROOT}/lib" \
   -Wl,/defaultlib:xecorelib.a \
