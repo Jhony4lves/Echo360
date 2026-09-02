@@ -33,14 +33,15 @@ done
 mkdir -p "${OUT_DIR}"
 rm -f "${PE}" "${XEX}"
 
-# The pinned OpenXeChain PowerPC/COFF backend cannot safely use function/data
-# sections: its one_only COMDAT emission leaves definition symbols undefined.
+# The Xbox driver intentionally has no implicit system-include hook, so the
+# installed xecore headers must be supplied explicitly.
 "${CLANG}" \
   -std=c11 \
   -Os \
   -ffreestanding \
   -fno-builtin \
   -nostdlib \
+  -I"${SYSROOT}/include" \
   -Wall \
   -Wextra \
   -Werror \
@@ -61,13 +62,10 @@ test -s "${XEX}"
 python3 - "${PE}" "${XEX}" <<'PY'
 from pathlib import Path
 import sys
-
 pe = Path(sys.argv[1])
 xex = Path(sys.argv[2])
-if pe.read_bytes()[:2] != b"MZ":
-    raise SystemExit("EchoCorePairing PE is missing MZ signature")
-if xex.read_bytes()[:4] != b"XEX2":
-    raise SystemExit("EchoCorePairing XEX is missing XEX2 signature")
+if pe.read_bytes()[:2] != b"MZ": raise SystemExit("EchoCorePairing PE is missing MZ signature")
+if xex.read_bytes()[:4] != b"XEX2": raise SystemExit("EchoCorePairing XEX is missing XEX2 signature")
 print(f"EchoCore pairing PE:  {pe} ({pe.stat().st_size} bytes)")
 print(f"EchoCore pairing XEX: {xex} ({xex.stat().st_size} bytes, magic XEX2)")
 PY
