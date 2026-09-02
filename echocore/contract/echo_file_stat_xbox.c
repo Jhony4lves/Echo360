@@ -27,9 +27,10 @@ static uint8_t echo_stat_status_from_ntstatus(NTSTATUS status) {
             return ECHO_STATUS_NOT_FOUND;
         case STATUS_ACCESS_DENIED:
             return ECHO_STATUS_ACCESS_DENIED;
+        case ECHO_NTSTATUS_NOT_A_DIRECTORY:
+            return ECHO_STATUS_NOT_DIRECTORY;
         case STATUS_OBJECT_NAME_INVALID:
         case STATUS_INVALID_PARAMETER:
-        case ECHO_NTSTATUS_NOT_A_DIRECTORY:
             return ECHO_STATUS_INVALID_PATH;
         case STATUS_NOT_SUPPORTED:
         case STATUS_NOT_IMPLEMENTED:
