@@ -37,8 +37,22 @@ extern NTSTATUS NtQueryDirectoryFile(
 );
 extern NTSTATUS NtClose(HANDLE handle);
 
-#define ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND ((NTSTATUS)0xC000003AU)
-#define ECHO_NTSTATUS_NOT_A_DIRECTORY       ((NTSTATUS)0xC0000103U)
+/*
+ * Pinned xecorelib defines STATUS_* through an undeclared STATUS typedef.
+ * Keep the small set needed by EchoCore as explicit NTSTATUS values instead.
+ */
+#define ECHO_NTSTATUS_SUCCESS                ((NTSTATUS)0x00000000U)
+#define ECHO_NTSTATUS_NO_MORE_FILES          ((NTSTATUS)0x80000006U)
+#define ECHO_NTSTATUS_NO_SUCH_FILE           ((NTSTATUS)0xC000000FU)
+#define ECHO_NTSTATUS_INVALID_PARAMETER      ((NTSTATUS)0xC000000DU)
+#define ECHO_NTSTATUS_NOT_IMPLEMENTED        ((NTSTATUS)0xC0000002U)
+#define ECHO_NTSTATUS_ACCESS_DENIED          ((NTSTATUS)0xC0000022U)
+#define ECHO_NTSTATUS_OBJECT_NAME_INVALID    ((NTSTATUS)0xC0000033U)
+#define ECHO_NTSTATUS_OBJECT_NAME_NOT_FOUND  ((NTSTATUS)0xC0000034U)
+#define ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND  ((NTSTATUS)0xC000003AU)
+#define ECHO_NTSTATUS_NOT_SUPPORTED          ((NTSTATUS)0xC00000BBU)
+#define ECHO_NTSTATUS_NOT_A_DIRECTORY        ((NTSTATUS)0xC0000103U)
+#define ECHO_NTSTATUS_NOT_FOUND              ((NTSTATUS)0xC0000225U)
 #define ECHO_DIR_QUERY_BUFFER_BYTES 576U
 
 /* Xbox/Xenia layout: fixed 0x40-byte header followed by ANSI bytes. */
@@ -63,20 +77,20 @@ _Static_assert(
 
 static uint8_t echo_dir_status_from_ntstatus(NTSTATUS status) {
     switch (status) {
-        case STATUS_NO_SUCH_FILE:
-        case STATUS_OBJECT_NAME_NOT_FOUND:
-        case STATUS_NOT_FOUND:
+        case ECHO_NTSTATUS_NO_SUCH_FILE:
+        case ECHO_NTSTATUS_OBJECT_NAME_NOT_FOUND:
+        case ECHO_NTSTATUS_NOT_FOUND:
         case ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND:
             return ECHO_STATUS_NOT_FOUND;
-        case STATUS_ACCESS_DENIED:
+        case ECHO_NTSTATUS_ACCESS_DENIED:
             return ECHO_STATUS_ACCESS_DENIED;
         case ECHO_NTSTATUS_NOT_A_DIRECTORY:
             return ECHO_STATUS_NOT_DIRECTORY;
-        case STATUS_OBJECT_NAME_INVALID:
-        case STATUS_INVALID_PARAMETER:
+        case ECHO_NTSTATUS_OBJECT_NAME_INVALID:
+        case ECHO_NTSTATUS_INVALID_PARAMETER:
             return ECHO_STATUS_INVALID_PATH;
-        case STATUS_NOT_SUPPORTED:
-        case STATUS_NOT_IMPLEMENTED:
+        case ECHO_NTSTATUS_NOT_SUPPORTED:
+        case ECHO_NTSTATUS_NOT_IMPLEMENTED:
             return ECHO_STATUS_UNSUPPORTED;
         default:
             return ECHO_STATUS_IO_ERROR;
@@ -190,7 +204,7 @@ int echo_xbox_dir_list(
 
     RtlInitAnsiString(&name, native_path);
     RtlInitAnsiString(&mask, mask_text);
-    attributes.root_directory = (HANDLE)0;
+    attributes.root_directory = 0U;
     attributes.name_ptr = &name;
     attributes.attributes = OBJ_CASE_INSENSITIVE;
 
@@ -202,7 +216,7 @@ int echo_xbox_dir_list(
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
     );
-    if (status < 0) {
+    if (FAILED(status)) {
         result->status = echo_dir_status_from_ntstatus(status);
         return 0;
     }
@@ -213,7 +227,7 @@ int echo_xbox_dir_list(
         echo_directory_entry entry;
         int copy_result;
 
-        io_status.Status = STATUS_SUCCESS;
+        io_status.Status = ECHO_NTSTATUS_SUCCESS;
         io_status.Information = 0U;
         status = echo_dir_query_one(
             directory,
@@ -224,8 +238,8 @@ int echo_xbox_dir_list(
         );
         restart_scan = 0U;
 
-        if (status == STATUS_NO_MORE_FILES) break;
-        if (status < 0) {
+        if (status == ECHO_NTSTATUS_NO_MORE_FILES) break;
+        if (FAILED(status)) {
             result->status = echo_dir_status_from_ntstatus(status);
             break;
         }
