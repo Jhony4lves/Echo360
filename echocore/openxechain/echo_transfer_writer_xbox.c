@@ -12,6 +12,9 @@
 #define ECHO_PART_SUFFIX ".echo.part"
 #define ECHO_PART_SUFFIX_BYTES 10U
 
+/* xecorelib's STATUS_* macros currently cast through an undeclared STATUS. */
+#define ECHO_NTSTATUS_OBJECT_NAME_COLLISION ((NTSTATUS)UINT32_C(0xC0000035))
+
 /* Exact Xbox 360 X_FILE_RENAME_INFORMATION layout: 16 bytes on the wire. */
 typedef struct echo_file_rename_information {
     uint32_t replace_existing;
@@ -122,7 +125,7 @@ static int echo_writer_query_size(HANDLE file, uint64_t *size_out) {
         (uint32_t)sizeof(info),
         FileNetworkOpenInformation
     );
-    if (status < 0 || info.EndOfFile < 0) return ECHO_WRITER_IO_ERROR;
+    if (FAILED(status) || info.EndOfFile < 0) return ECHO_WRITER_IO_ERROR;
     *size_out = (uint64_t)info.EndOfFile;
     return ECHO_WRITER_OK;
 }
@@ -141,7 +144,7 @@ static int echo_writer_set_size(HANDLE file, uint64_t size) {
         (uint32_t)sizeof(end_info),
         FileEndOfFileInformation
     );
-    return status < 0 ? ECHO_WRITER_IO_ERROR : ECHO_WRITER_OK;
+    return FAILED(status) ? ECHO_WRITER_IO_ERROR : ECHO_WRITER_OK;
 }
 
 static int echo_writer_rehash_prefix(
@@ -178,7 +181,7 @@ static int echo_writer_rehash_prefix(
             request,
             &byte_offset
         );
-        if (status < 0 || io_status.Information != request) {
+        if (FAILED(status) || io_status.Information != request) {
             return ECHO_WRITER_IO_ERROR;
         }
 
@@ -245,7 +248,7 @@ int echo_transfer_writer_open(
     }
 
     RtlInitAnsiString(&temp_name, temp_native);
-    attributes.root_directory = (HANDLE)0;
+    attributes.root_directory = 0U;
     attributes.name_ptr = &temp_name;
     attributes.attributes = OBJ_CASE_INSENSITIVE;
     echo_writer_zero(&io_status, sizeof(io_status));
@@ -262,7 +265,7 @@ int echo_transfer_writer_open(
         disposition,
         FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT
     );
-    if (status < 0 || writer->file_handle == (HANDLE)0) {
+    if (FAILED(status) || writer->file_handle == (HANDLE)0) {
         echo_transfer_writer_reset(writer);
         return ECHO_WRITER_IO_ERROR;
     }
@@ -343,7 +346,7 @@ int echo_transfer_writer_write_chunk(
         data_bytes,
         &byte_offset
     );
-    if (status < 0 || io_status.Information != data_bytes) {
+    if (FAILED(status) || io_status.Information != data_bytes) {
         return ECHO_WRITER_IO_ERROR;
     }
 
@@ -373,7 +376,7 @@ int echo_transfer_writer_finalize(
 
     echo_writer_zero(&io_status, sizeof(io_status));
     status = NtFlushBuffersFile(writer->file_handle, &io_status);
-    if (status < 0) {
+    if (FAILED(status)) {
         echo_transfer_writer_abort(writer);
         return ECHO_WRITER_IO_ERROR;
     }
@@ -411,8 +414,8 @@ int echo_transfer_writer_finalize(
         FileRenameInformation
     );
 
-    if (status < 0) {
-        int result = status == STATUS_OBJECT_NAME_COLLISION
+    if (FAILED(status)) {
+        int result = status == ECHO_NTSTATUS_OBJECT_NAME_COLLISION
             ? ECHO_WRITER_DESTINATION_EXISTS
             : ECHO_WRITER_IO_ERROR;
         echo_transfer_writer_abort(writer);
