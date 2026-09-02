@@ -6,18 +6,63 @@
 #include "../openxechain/echo_protocol.h"
 
 static void build_valid_ping(uint8_t header[ECHO_HEADER_BYTES]) {
-    memset(header, 0, ECHO_HEADER_BYTES);
-    header[0] = ECHO_MAGIC_0;
-    header[1] = ECHO_MAGIC_1;
-    header[2] = ECHO_MAGIC_2;
-    header[3] = ECHO_MAGIC_3;
-    header[4] = ECHO_VERSION;
-    header[5] = ECHO_TYPE_PING;
-    echo_write_be32(header + 8U, ECHO_PING_PAYLOAD_BYTES);
-    echo_write_be32(header + 12U, 0x12345678U);
+    echo_make_frame_header(
+        header,
+        ECHO_TYPE_PING,
+        0U,
+        ECHO_PING_PAYLOAD_BYTES,
+        UINT32_C(0x12345678)
+    );
 }
 
-int main(void) {
+static void test_generic_parser_roundtrip(void) {
+    uint8_t header[ECHO_HEADER_BYTES];
+    echo_frame_header parsed;
+
+    echo_make_frame_header(
+        header,
+        0x16U,
+        UINT16_C(0x1234),
+        UINT32_C(0x00010203),
+        UINT32_C(0x89ABCDEF)
+    );
+    assert(echo_parse_frame_header(header, &parsed) == ECHO_FRAME_OK);
+    assert(parsed.type == 0x16U);
+    assert(parsed.flags == UINT16_C(0x1234));
+    assert(parsed.payload_length == UINT32_C(0x00010203));
+    assert(parsed.request_id == UINT32_C(0x89ABCDEF));
+}
+
+static void test_generic_parser_bounds(void) {
+    uint8_t header[ECHO_HEADER_BYTES];
+    echo_frame_header parsed;
+
+    echo_make_frame_header(
+        header,
+        0x10U,
+        0U,
+        ECHO_FRAME_MAX_PAYLOAD_BYTES,
+        1U
+    );
+    assert(echo_parse_frame_header(header, &parsed) == ECHO_FRAME_OK);
+    assert(parsed.payload_length == ECHO_FRAME_MAX_PAYLOAD_BYTES);
+
+    echo_write_be32(header + 8U, ECHO_FRAME_MAX_PAYLOAD_BYTES + 1U);
+    assert(echo_parse_frame_header(header, &parsed) == ECHO_FRAME_TOO_LARGE);
+
+    echo_make_frame_header(header, 0x10U, 0U, 0U, 1U);
+    header[3] ^= 1U;
+    assert(echo_parse_frame_header(header, &parsed) == ECHO_FRAME_BAD_MAGIC);
+
+    echo_make_frame_header(header, 0x10U, 0U, 0U, 1U);
+    header[4] = (uint8_t)(ECHO_VERSION + 1U);
+    assert(echo_parse_frame_header(header, &parsed) == ECHO_FRAME_BAD_VERSION);
+
+    assert(echo_parse_frame_header(NULL, &parsed) == ECHO_FRAME_INVALID_ARGUMENT);
+    assert(echo_parse_frame_header(header, NULL) == ECHO_FRAME_INVALID_ARGUMENT);
+}
+
+static void test_bootstrap_ping_contract(void) {
     uint8_t header[ECHO_HEADER_BYTES];
     uint8_t original[ECHO_HEADER_BYTES];
 
@@ -55,6 +100,15 @@ int main(void) {
     echo_write_be32(header + 8U, ECHO_PING_PAYLOAD_BYTES + 1U);
     assert(echo_validate_ping_header(header) == -4);
 
+    build_valid_ping(header);
+    echo_write_be32(header + 8U, ECHO_FRAME_MAX_PAYLOAD_BYTES + 1U);
+    assert(echo_validate_ping_header(header) == -4);
+}
+
+int main(void) {
+    test_generic_parser_roundtrip();
+    test_generic_parser_bounds();
+    test_bootstrap_ping_contract();
     puts("EchoCore protocol tests: OK");
     return 0;
 }
