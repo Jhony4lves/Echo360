@@ -74,17 +74,35 @@ class RemoteGameIntegrityProbeTest {
     }
 
     @Test
-    fun `missing file is only declared after directory was readable`() = runBlocking {
+    fun `missing file is only declared after readable directory returned other entries`() = runBlocking {
         val session = FakeSession(
-            listBlock = { emptyList() },
+            listBlock = {
+                listOf(RemoteEntry("other.bin", "/Hdd1/Games/Test/other.bin", false, 128L))
+            },
             sizeBlock = { null },
         )
 
         val result = probe.verify(session, game())
 
         assertEquals(RemoteGameIntegrityProbe.CODE_EXECUTABLE_MISSING, result.findings.single().code)
+        assertEquals(IntegritySeverity.Error, result.findings.single().severity)
         assertEquals(1, session.listCalls)
         assertEquals(1, session.sizeCalls)
+    }
+
+    @Test
+    fun `empty parsed listing without SIZE stays informational`() = runBlocking {
+        val session = FakeSession(
+            listBlock = { emptyList() },
+            sizeBlock = { null },
+        )
+
+        val result = probe.verify(session, game())
+        val finding = result.findings.single()
+
+        assertFalse(result.verified)
+        assertEquals(RemoteGameIntegrityProbe.CODE_EMPTY_OR_UNPARSED_LIST, finding.code)
+        assertEquals(IntegritySeverity.Info, finding.severity)
     }
 
     @Test
