@@ -5,18 +5,12 @@
 #include <xecore/xboxkrnl_rtl.h>
 #include <xecore/xboxkrnl_types.h>
 
+#include "echo_file_stat_xbox.h"
 #include "echo_path_policy.h"
-#include "echo_readonly_contract.h"
 
 /* Present in Xbox 360 NTSTATUS tables but not yet named by pinned xecorelib. */
 #define ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND ((NTSTATUS)0xC000003AU)
 #define ECHO_NTSTATUS_NOT_A_DIRECTORY       ((NTSTATUS)0xC0000103U)
-
-typedef struct echo_file_stat_result {
-    uint8_t status;
-    uint8_t object_type;
-    uint64_t size;
-} echo_file_stat_result;
 
 static uint8_t echo_stat_status_from_ntstatus(NTSTATUS status) {
     switch (status) {
