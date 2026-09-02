@@ -6,6 +6,8 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/ic_echo360_launcher"
+        android:roundIcon="@drawable/ic_echo360_launcher"
         android:label="Echo360"
         android:supportsRtl="true"
         android:theme="@style/Theme.Echo360">

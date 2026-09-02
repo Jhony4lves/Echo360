@@ -1,3 +1,4 @@
+import java.util.Base64
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 
@@ -6,6 +7,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val generatedLauncherIconResDir =
+    layout.buildDirectory.dir("generated/echo360/launcherIcon/res").get().asFile
 
 android {
     namespace = "com.jhony4lves.echo360"
@@ -48,6 +52,10 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    sourceSets {
+        getByName("main").res.srcDir(generatedLauncherIconResDir)
+    }
 }
 
 dependencies {
@@ -67,6 +75,24 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     testImplementation("junit:junit:4.13.2")
+}
+
+val generateLauncherIcon = tasks.register("generateLauncherIcon") {
+    val encodedIcon = layout.projectDirectory.file("src/main/icon/echo360_launcher.webp.b64")
+    val outputIcon = generatedLauncherIconResDir.resolve("drawable-nodpi/ic_echo360_launcher.webp")
+
+    inputs.file(encodedIcon)
+    outputs.file(outputIcon)
+
+    doLast {
+        outputIcon.parentFile.mkdirs()
+        val encoded = encodedIcon.asFile.readText().filterNot(Char::isWhitespace)
+        outputIcon.writeBytes(Base64.getDecoder().decode(encoded))
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(generateLauncherIcon)
 }
 
 tasks.withType<Test>().configureEach {
