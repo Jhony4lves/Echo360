@@ -64,6 +64,45 @@ class PlaySessionEngineTest {
     }
 
     @Test
+    fun `stopping observation closes at last sample and does not count app background gap`() {
+        var ledger = PlaySessionLedger()
+        ledger = engine.observe(ledger, observation("A", 0L))
+        ledger = engine.observe(ledger, observation("A", 60_000L))
+
+        ledger = engine.stopObserving(ledger)
+
+        assertNull(ledger.active)
+        assertEquals(60_000L, ledger.recent.single().endedAtEpochMs)
+        assertEquals(60_000L, ledger.recent.single().durationMs)
+
+        ledger = engine.observe(ledger, observation("A", 90_000L))
+        val summary = engine.summaryFor(ledger, "A")
+        assertEquals(60_000L, summary.totalObservedMs)
+        assertEquals(2, summary.sessionCount)
+        assertEquals(90_000L, summary.activeSession?.startedAtEpochMs)
+    }
+
+    @Test
+    fun `stop observation is idempotent without an active session`() {
+        val ledger = PlaySessionLedger(
+            recent = listOf(
+                PlaySession(
+                    id = "done",
+                    stableKey = "A",
+                    titleId = 1L,
+                    mediaId = 2L,
+                    title = "A",
+                    startedAtEpochMs = 0L,
+                    lastSeenAtEpochMs = 10L,
+                    endedAtEpochMs = 10L,
+                ),
+            ),
+        )
+
+        assertSame(ledger, engine.stopObserving(ledger))
+    }
+
+    @Test
     fun `out of order observation is ignored`() {
         var ledger = PlaySessionLedger()
         ledger = engine.observe(ledger, observation("A", 100_000L))
