@@ -50,6 +50,7 @@ object SaveVaultIntegrityEngine {
     fun verify(
         manifest: SaveVaultManifest,
         localFiles: List<SaveVaultLocalFileEvidence>,
+        extraRelativePaths: List<String> = emptyList(),
     ): SaveVaultIntegrityReport {
         val localByPath = linkedMapOf<String, SaveVaultLocalFileEvidence>()
         localFiles.forEach { evidence ->
@@ -59,7 +60,19 @@ object SaveVaultIntegrityEngine {
             }
         }
 
-        val expectedKeys = manifest.files.associateBy { it.relativePath.lowercase() }
+        val expectedKeys = manifest.files.mapTo(hashSetOf()) { it.relativePath.lowercase() }
+        require(localByPath.keys.all { it in expectedKeys }) {
+            "Somente arquivos declarados devem ser hashados como evidência local."
+        }
+
+        val normalizedExtras = extraRelativePaths.map(SaveVaultPathPolicy::validateRelativePath)
+        require(normalizedExtras.distinctBy(String::lowercase).size == normalizedExtras.size) {
+            "Lista de arquivos extras contém paths duplicados."
+        }
+        require(normalizedExtras.none { it.lowercase() in expectedKeys }) {
+            "Arquivo declarado no manifesto não pode ser classificado como extra."
+        }
+
         val findings = mutableListOf<SaveVaultIntegrityFinding>()
         var checked = 0
 
@@ -94,12 +107,11 @@ object SaveVaultIntegrityEngine {
             }
         }
 
-        val extras = localFiles.filter { it.relativePath.lowercase() !in expectedKeys }
-        extras.forEach { extra ->
+        normalizedExtras.forEach { extra ->
             findings += SaveVaultIntegrityFinding(
                 code = SaveVaultIntegrityCode.ExtraFile,
                 severity = SaveVaultIntegritySeverity.Warning,
-                relativePath = extra.relativePath,
+                relativePath = extra,
                 evidence = "Arquivo existe no payload local, mas não está declarado no manifesto.",
             )
         }
@@ -108,7 +120,7 @@ object SaveVaultIntegrityEngine {
             snapshotId = manifest.id,
             checkedFiles = checked,
             expectedFiles = manifest.fileCount,
-            extraFiles = extras.size,
+            extraFiles = normalizedExtras.size,
             findings = findings.sortedWith(
                 compareByDescending<SaveVaultIntegrityFinding> { it.severity.rank }
                     .thenBy { it.relativePath.lowercase() }
