@@ -5,6 +5,8 @@
 #include <stdint.h>
 
 #define ECHO_PATH_MAX 512U
+#define ECHO_NATIVE_HDD1_PREFIX "\\Device\\Harddisk0\\Partition1"
+#define ECHO_NATIVE_PATH_MAX 544U
 
 static inline int echo_path_ascii_equal_ci(char a, char b) {
     if (a >= 'A' && a <= 'Z') a = (char)(a + ('a' - 'A'));
@@ -61,6 +63,38 @@ static inline int echo_path_is_safe_readonly(const char *path, size_t length) {
         }
     }
     return 1;
+}
+
+/*
+ * Translate an already validated Hdd1 path to a native kernel device path.
+ * Output is NUL-terminated for RtlInitAnsiString / OBJECT_ATTRIBUTES use.
+ */
+static inline int echo_path_to_native_hdd1(
+    const char *path,
+    size_t length,
+    char *out,
+    size_t out_capacity,
+    size_t *out_length
+) {
+    static const char prefix[] = ECHO_NATIVE_HDD1_PREFIX;
+    const size_t prefix_len = sizeof(prefix) - 1U;
+    size_t source_i;
+    size_t dest_i;
+
+    if (!echo_path_is_safe_readonly(path, length) || out == NULL) return -1;
+    if (prefix_len + (length - 5U) + 1U > out_capacity) return -2;
+
+    for (dest_i = 0U; dest_i < prefix_len; ++dest_i) {
+        out[dest_i] = prefix[dest_i];
+    }
+
+    for (source_i = 5U; source_i < length; ++source_i) {
+        char ch = path[source_i];
+        out[dest_i++] = (ch == '/') ? '\\' : ch;
+    }
+    out[dest_i] = '\0';
+    if (out_length != NULL) *out_length = dest_i;
+    return 0;
 }
 
 #endif
