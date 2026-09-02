@@ -21,9 +21,18 @@ typedef struct echo_file_rename_information {
     uint32_t name_buffer;
 } echo_file_rename_information;
 
+/* Xbox X_FILE_END_OF_FILE_INFORMATION is exactly one 64-bit length field. */
+typedef struct echo_file_end_of_file_information {
+    uint64_t end_of_file;
+} echo_file_end_of_file_information;
+
 _Static_assert(
     sizeof(echo_file_rename_information) == 16U,
     "Xbox FILE_RENAME_INFORMATION must be 16 bytes"
+);
+_Static_assert(
+    sizeof(echo_file_end_of_file_information) == 8U,
+    "Xbox FILE_END_OF_FILE_INFORMATION must be 8 bytes"
 );
 
 static void echo_writer_zero(void *memory, size_t length) {
@@ -116,6 +125,23 @@ static int echo_writer_query_size(HANDLE file, uint64_t *size_out) {
     if (status < 0 || info.EndOfFile < 0) return ECHO_WRITER_IO_ERROR;
     *size_out = (uint64_t)info.EndOfFile;
     return ECHO_WRITER_OK;
+}
+
+static int echo_writer_set_size(HANDLE file, uint64_t size) {
+    echo_file_end_of_file_information end_info;
+    IO_STATUS_BLOCK io_status;
+    NTSTATUS status;
+
+    end_info.end_of_file = size;
+    echo_writer_zero(&io_status, sizeof(io_status));
+    status = NtSetInformationFile(
+        file,
+        &io_status,
+        &end_info,
+        (uint32_t)sizeof(end_info),
+        FileEndOfFileInformation
+    );
+    return status < 0 ? ECHO_WRITER_IO_ERROR : ECHO_WRITER_OK;
 }
 
 static int echo_writer_rehash_prefix(
@@ -247,9 +273,16 @@ int echo_transfer_writer_open(
         echo_transfer_writer_abort(writer);
         return result;
     }
-    if (existing_size != resume_offset) {
+    if (existing_size < resume_offset) {
         echo_transfer_writer_abort(writer);
         return ECHO_WRITER_RESUME_MISMATCH;
+    }
+    if (existing_size > resume_offset) {
+        result = echo_writer_set_size(writer->file_handle, resume_offset);
+        if (result != ECHO_WRITER_OK) {
+            echo_transfer_writer_abort(writer);
+            return result;
+        }
     }
 
     if (echo_transfer_begin(
