@@ -19,7 +19,18 @@ for source in echocore/tests/*_test.c; do
   name="$(basename "${source}" .c)"
   binary="/tmp/${name}"
   echo "[EchoCore host test] compile ${source}"
-  "${CC}" "${CFLAGS[@]}" "${source}" -o "${binary}"
+
+  if [[ "${name}" == "echo_transfer_writer_behavior_test" ]]; then
+    "${CC}" "${CFLAGS[@]}" \
+      -fno-pie -no-pie \
+      -Iechocore/tests/xbox_stubs \
+      echocore/openxechain/echo_transfer_writer_xbox.c \
+      "${source}" \
+      -o "${binary}"
+  else
+    "${CC}" "${CFLAGS[@]}" "${source}" -o "${binary}"
+  fi
+
   echo "[EchoCore host test] run ${name}"
   "${binary}"
 done
