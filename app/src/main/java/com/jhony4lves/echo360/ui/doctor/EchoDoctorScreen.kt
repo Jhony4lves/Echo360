@@ -190,7 +190,9 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
                                 color = EchoColors.TextSecondary,
                             )
                         } else {
-                            configured.forEach(::PluginRow)
+                            configured.forEach { plugin ->
+                                PluginRow(plugin)
+                            }
                         }
                     }
                 }
