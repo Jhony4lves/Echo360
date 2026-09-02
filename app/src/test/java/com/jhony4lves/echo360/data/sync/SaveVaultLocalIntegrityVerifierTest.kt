@@ -6,6 +6,7 @@ import com.jhony4lves.echo360.domain.sync.SaveVaultManifestFile
 import com.jhony4lves.echo360.network.ftp.FtpRoute
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -46,6 +47,19 @@ class SaveVaultLocalIntegrityVerifierTest {
         assertFalse(report.valid)
         assertFalse(report.complete)
         assertTrue(report.findings.any { it.code == SaveVaultIntegrityCode.WrongObjectType })
+    }
+
+    @Test
+    fun `symbolic link is rejected before target bytes can be trusted`() = withSnapshot { snapshot ->
+        val payload = snapshot.directory.resolve("payload")
+        payload.mkdirs()
+        val outsideTarget = snapshot.directory.resolve("outside-target.bin")
+        outsideTarget.writeBytes("abc".toByteArray())
+        Files.createSymbolicLink(payload.resolve("save.bin").toPath(), outsideTarget.toPath())
+
+        assertThrows(IllegalStateException::class.java) {
+            runBlocking { SaveVaultLocalIntegrityVerifier().verify(snapshot) }
+        }
     }
 
     private fun withSnapshot(block: (StoredSaveVaultSnapshot) -> Unit) {
