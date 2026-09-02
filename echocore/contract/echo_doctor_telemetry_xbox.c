@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdint.h>
 
 #include <xecore/xboxkrnl_hal.h>
@@ -11,6 +12,14 @@
 #define ECHO_TEMP_MIN_Q8_8 0x0100U
 #define ECHO_TEMP_MAX_Q8_8 0x7D00U /* 125.0 C: protocol sanity bound, not a health threshold. */
 
+/* Prevent freestanding aggregate-zeroing from becoming an implicit memset. */
+static void echo_doctor_zero(void *memory, size_t length) {
+    volatile uint8_t *bytes = (volatile uint8_t *)memory;
+    size_t i;
+    if (bytes == NULL) return;
+    for (i = 0U; i < length; ++i) bytes[i] = 0U;
+}
+
 static uint16_t echo_read_le16(const uint8_t *bytes) {
     return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8U));
 }
@@ -20,17 +29,18 @@ static int echo_temperature_raw_is_plausible(uint16_t raw) {
 }
 
 void echo_xbox_read_memory(echo_doctor_memory *memory) {
-    MM_QUERY_STATISTICS_RESULT stats = {0};
+    MM_QUERY_STATISTICS_RESULT stats;
     NTSTATUS status;
     uint64_t total_pages;
     uint64_t free_pages;
 
-    if (memory == 0) return;
+    if (memory == NULL) return;
     memory->status = ECHO_STATUS_IO_ERROR;
     memory->free_bytes = 0U;
     memory->used_bytes = 0U;
     memory->total_bytes = 0U;
 
+    echo_doctor_zero(&stats, sizeof(stats));
     stats.size = (uint32_t)sizeof(stats);
     status = MmQueryStatistics(&stats);
     if (FAILED(status)) return;
@@ -46,20 +56,22 @@ void echo_xbox_read_memory(echo_doctor_memory *memory) {
 }
 
 void echo_xbox_read_temperature(echo_doctor_temperature *temperature) {
-    uint8_t message[ECHO_SMC_MESSAGE_BYTES] = {0};
-    uint8_t response[ECHO_SMC_MESSAGE_BYTES] = {0};
+    uint8_t message[ECHO_SMC_MESSAGE_BYTES];
+    uint8_t response[ECHO_SMC_MESSAGE_BYTES];
     uint16_t cpu;
     uint16_t gpu;
     uint16_t memory;
     uint16_t box;
 
-    if (temperature == 0) return;
+    if (temperature == NULL) return;
     temperature->status = ECHO_STATUS_IO_ERROR;
     temperature->cpu_q8_8 = 0U;
     temperature->gpu_q8_8 = 0U;
     temperature->memory_q8_8 = 0U;
     temperature->case_q8_8 = 0U;
 
+    echo_doctor_zero(message, sizeof(message));
+    echo_doctor_zero(response, sizeof(response));
     message[0] = ECHO_SMC_TEMPERATURE_COMMAND;
     HalSendSMCMessage(message, response);
 
