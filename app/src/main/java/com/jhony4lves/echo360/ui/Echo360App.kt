@@ -20,6 +20,7 @@ import com.jhony4lves.echo360.ui.components.EchoNavGlyph
 import com.jhony4lves.echo360.ui.doctor.EchoDoctorScreen
 import com.jhony4lves.echo360.ui.home.EchoPlayerHomeScreen
 import com.jhony4lves.echo360.ui.library.EchoPlayerLibraryScreen
+import com.jhony4lves.echo360.ui.stats.EchoStatsScreen
 import com.jhony4lves.echo360.ui.system.XboxSystemScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
 import com.jhony4lves.echo360.ui.theme.EchoTheme
@@ -32,6 +33,7 @@ private enum class EchoDestination(
     Home("Home", "HM"),
     Library("Jogos", "LB"),
     Transfer("Transfer", "TX"),
+    Stats("Stats", "ST"),
     Doctor("Doctor", "DR"),
     System("Xbox", "XB"),
 }
@@ -82,6 +84,10 @@ fun Echo360App() {
                     )
 
                     EchoDestination.Transfer -> EchoTransferHostScreen(
+                        modifier = Modifier.padding(innerPadding),
+                    )
+
+                    EchoDestination.Stats -> EchoStatsScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
 
