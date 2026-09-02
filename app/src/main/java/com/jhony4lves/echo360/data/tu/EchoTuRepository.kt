@@ -29,6 +29,12 @@ class EchoTuRepository(
 ) {
     private val configStore = SecureXboxConfigStore(context.applicationContext)
 
+    suspend fun currentRuntime(): RuntimeTitleUpdateObservation? = withContext(Dispatchers.IO) {
+        val profile = configStore.load()
+            ?: error("Configure e salve o Xbox antes de ler o título atual.")
+        observeRuntime(profile)
+    }
+
     suspend fun inspect(titleId: String): TitleUpdateInventory = withContext(Dispatchers.IO) {
         val requestedTitleId = EchoTuTitleId.normalize(titleId)
         val profile = configStore.load()
