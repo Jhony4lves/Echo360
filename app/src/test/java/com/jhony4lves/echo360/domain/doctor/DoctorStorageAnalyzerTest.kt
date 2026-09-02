@@ -15,6 +15,7 @@ class DoctorStorageAnalyzerTest {
                 DoctorStorageMount(
                     canonicalRoot = "/Hdd1",
                     observedName = "Hdd1",
+                    objectType = DoctorStorageObjectType.Directory,
                     entries = listOf(
                         DoctorStorageEntry(
                             name = "Content",
@@ -48,6 +49,23 @@ class DoctorStorageAnalyzerTest {
     }
 
     @Test
+    fun `mount reported as file is warned`() {
+        val findings = analyzer.analyze(
+            snapshot(
+                mounts = listOf(
+                    mount(
+                        root = "/Hdd1",
+                        observedName = "Hdd1",
+                        objectType = DoctorStorageObjectType.File,
+                    ),
+                ),
+            ),
+        )
+
+        assertTrue(findings.any { it.code == DoctorStorageAnalyzer.CODE_ROOT_NOT_DIRECTORY })
+    }
+
+    @Test
     fun `bounded directory is informational not corruption`() {
         val snapshot = snapshot(
             mounts = listOf(mount("/Hdd1", "Hdd1", limitReached = true)),
@@ -66,6 +84,7 @@ class DoctorStorageAnalyzerTest {
                 DoctorStorageMount(
                     canonicalRoot = "/Hdd1",
                     observedName = "Hdd1",
+                    objectType = DoctorStorageObjectType.Directory,
                     entries = listOf(
                         DoctorStorageEntry(
                             name = "game.xex",
@@ -89,7 +108,7 @@ class DoctorStorageAnalyzerTest {
     @Test
     fun `transport unavailable does not become no mounts health finding`() {
         val snapshot = DoctorStorageSnapshot(
-            origin = DoctorStorageOrigin.AuroraFtpCompatibility,
+            origin = DoctorStorageOrigin.Unavailable,
             mounts = emptyList(),
             rootEntryCount = 0,
             rootLimitReached = false,
@@ -120,9 +139,11 @@ class DoctorStorageAnalyzerTest {
         root: String,
         observedName: String,
         limitReached: Boolean = false,
+        objectType: DoctorStorageObjectType = DoctorStorageObjectType.Directory,
     ) = DoctorStorageMount(
         canonicalRoot = root,
         observedName = observedName,
+        objectType = objectType,
         entries = emptyList(),
         limitReached = limitReached,
     )
