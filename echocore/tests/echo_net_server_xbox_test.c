@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../openxechain/echo_session_protocol.h"
 #include "../openxechain/echo_net_server_xbox.c"
 
 static uint8_t g_input[256];
