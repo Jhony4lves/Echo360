@@ -90,6 +90,18 @@ class EchoCoreCandidateDomainMapperTest {
     }
 
     @Test
+    fun `FILE_STAT root directory maps under current Hdd1 root policy`() {
+        val decoded = EchoCoreReadOnlyCandidateCodec.decodeFileStat(
+            hex("00020000000000000000000000000000"),
+        )
+        val stat = EchoCoreCandidateDomainMapper.fileStat("/Hdd1", decoded)
+
+        assertEquals("/Hdd1", stat?.canonicalPath)
+        assertEquals(RemoteObjectType.Directory, stat?.objectType)
+        assertEquals(0L, stat?.sizeBytes)
+    }
+
+    @Test
     fun `FILE_STAT NOT_FOUND maps to null instead of transport failure`() {
         val decoded = EchoCoreReadOnlyCandidateCodec.decodeFileStat(
             hex("01000000000000000000000000000000"),
@@ -123,9 +135,6 @@ class EchoCoreCandidateDomainMapperTest {
 
         assertThrows(EchoCoreCandidateContractException::class.java) {
             EchoCoreCandidateDomainMapper.fileStat("/Usb0/Content/file.bin", decoded)
-        }
-        assertThrows(EchoCoreCandidateContractException::class.java) {
-            EchoCoreCandidateDomainMapper.fileStat("/Hdd1", decoded)
         }
     }
 
