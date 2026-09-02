@@ -24,17 +24,17 @@ internal class RemoteGameIntegrityProbe {
         session: XboxFtpSession,
         game: GameEntry,
     ): RemoteIntegrityProbeResult {
-        val directory = game.canonicalDirectory
+        val directory = game.canonicalDirectory?.trimEnd('/')
         val executable = game.executable.trim()
-        val executablePath = game.canonicalExecutablePath
 
-        if (directory.isNullOrBlank() || executablePath.isNullOrBlank() || !isSafeFileName(executable)) {
+        if (directory.isNullOrBlank() || !isSafeFileName(executable)) {
             return RemoteIntegrityProbeResult(
                 findings = emptyList(),
                 verified = false,
                 message = "Verificação remota bloqueada porque o path local do jogo não é seguro ou não foi resolvido.",
             )
         }
+        val executablePath = "$directory/$executable"
 
         val listing = try {
             session.list(directory)
