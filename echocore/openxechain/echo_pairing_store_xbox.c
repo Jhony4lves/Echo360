@@ -35,6 +35,14 @@ static void echo_pairing_copy(uint8_t *dest, const uint8_t *src, uint32_t length
     for (i = 0U; i < length; ++i) dest[i] = src[i];
 }
 
+static int echo_pairing_secret_is_zero(const uint8_t secret[ECHO_AUTH_SECRET_BYTES]) {
+    uint8_t any = 0U;
+    uint32_t i;
+    if (secret == NULL) return 1;
+    for (i = 0U; i < ECHO_AUTH_SECRET_BYTES; ++i) any = (uint8_t)(any | secret[i]);
+    return any == 0U ? 1 : 0;
+}
+
 static int echo_pairing_status_is_missing(NTSTATUS status) {
     return status == STATUS_NO_SUCH_FILE ||
            status == STATUS_OBJECT_NAME_NOT_FOUND ||
@@ -189,18 +197,21 @@ cleanup:
     return result;
 }
 
-static int echo_pairing_xbox_create_secret(
-    uint8_t secret_out[ECHO_AUTH_SECRET_BYTES]
+int echo_pairing_xbox_store_secret(
+    const uint8_t secret[ECHO_AUTH_SECRET_BYTES]
 ) {
     echo_transfer_writer writer;
-    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
     uint8_t record[ECHO_PAIRING_RECORD_BYTES];
     uint8_t record_digest[ECHO_PAIRING_DIGEST_BYTES];
     uint8_t file_digest[ECHO_PAIRING_DIGEST_BYTES];
     uint32_t transfer_id;
-    int result;
+    int writer_opened = 0;
+    int result = ECHO_PAIRING_STORE_IO_ERROR;
 
-    echo_pairing_zero(secret, sizeof(secret));
+    if (secret == NULL || echo_pairing_secret_is_zero(secret)) {
+        return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    }
+
     echo_pairing_zero(record, sizeof(record));
     echo_pairing_zero(record_digest, sizeof(record_digest));
     echo_pairing_zero(file_digest, sizeof(file_digest));
@@ -208,11 +219,6 @@ static int echo_pairing_xbox_create_secret(
 
     if (echo_pairing_create_directory(ECHO_PAIRING_NATIVE_DIR_1) != ECHO_PAIRING_STORE_OK ||
         echo_pairing_create_directory(ECHO_PAIRING_NATIVE_DIR_2) != ECHO_PAIRING_STORE_OK) {
-        result = ECHO_PAIRING_STORE_IO_ERROR;
-        goto cleanup;
-    }
-    if (echo_auth_xbox_generate_pairing_secret(secret) != 0) {
-        result = ECHO_PAIRING_STORE_IO_ERROR;
         goto cleanup;
     }
 
@@ -231,47 +237,65 @@ static int echo_pairing_xbox_create_secret(
                   (uint32_t)secret[3];
     if (transfer_id == 0U) transfer_id = ECHO_PAIRING_TRANSFER_ID_FALLBACK;
 
-    result = echo_transfer_writer_open(
-        &writer,
-        transfer_id,
-        ECHO_PAIRING_CANONICAL_PATH,
-        (uint32_t)(sizeof(ECHO_PAIRING_CANONICAL_PATH) - 1U),
-        ECHO_PAIRING_RECORD_BYTES,
-        0U,
-        NULL,
-        0U
-    );
-    if (result != ECHO_WRITER_OK) {
-        result = ECHO_PAIRING_STORE_IO_ERROR;
+    if (echo_transfer_writer_open(
+            &writer,
+            transfer_id,
+            ECHO_PAIRING_CANONICAL_PATH,
+            (uint32_t)(sizeof(ECHO_PAIRING_CANONICAL_PATH) - 1U),
+            ECHO_PAIRING_RECORD_BYTES,
+            0U,
+            NULL,
+            0U
+        ) != ECHO_WRITER_OK) {
         goto cleanup;
     }
-    result = echo_transfer_writer_write_chunk(
-        &writer,
-        0U,
-        record,
-        ECHO_PAIRING_RECORD_BYTES
-    );
-    if (result != ECHO_WRITER_OK) {
-        echo_transfer_writer_abort(&writer);
-        result = ECHO_PAIRING_STORE_IO_ERROR;
+    writer_opened = 1;
+
+    if (echo_transfer_writer_write_chunk(
+            &writer,
+            0U,
+            record,
+            ECHO_PAIRING_RECORD_BYTES
+        ) != ECHO_WRITER_OK) {
         goto cleanup;
     }
-    result = echo_transfer_writer_finalize(&writer, file_digest);
-    if (result != ECHO_WRITER_OK) {
-        echo_transfer_writer_abort(&writer);
-        result = ECHO_PAIRING_STORE_IO_ERROR;
+    if (echo_transfer_writer_finalize(&writer, file_digest) != ECHO_WRITER_OK) {
         goto cleanup;
     }
 
-    echo_pairing_copy(secret_out, secret, ECHO_AUTH_SECRET_BYTES);
+    writer_opened = 0;
     result = ECHO_PAIRING_STORE_CREATED;
 
 cleanup:
-    echo_transfer_writer_abort(&writer);
-    echo_pairing_zero(secret, sizeof(secret));
+    if (writer_opened) echo_transfer_writer_abort(&writer);
     echo_pairing_zero(record, sizeof(record));
     echo_pairing_zero(record_digest, sizeof(record_digest));
     echo_pairing_zero(file_digest, sizeof(file_digest));
+    return result;
+}
+
+static int echo_pairing_xbox_create_secret(
+    uint8_t secret_out[ECHO_AUTH_SECRET_BYTES]
+) {
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
+    int result;
+
+    if (secret_out == NULL) return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    echo_pairing_zero(secret, sizeof(secret));
+    echo_pairing_zero(secret_out, ECHO_AUTH_SECRET_BYTES);
+
+    if (echo_auth_xbox_generate_pairing_secret(secret) != 0) {
+        result = ECHO_PAIRING_STORE_IO_ERROR;
+        goto cleanup;
+    }
+
+    result = echo_pairing_xbox_store_secret(secret);
+    if (result != ECHO_PAIRING_STORE_CREATED) goto cleanup;
+
+    echo_pairing_copy(secret_out, secret, ECHO_AUTH_SECRET_BYTES);
+
+cleanup:
+    echo_pairing_zero(secret, sizeof(secret));
     if (result != ECHO_PAIRING_STORE_CREATED) echo_pairing_zero(secret_out, ECHO_AUTH_SECRET_BYTES);
     return result;
 }
