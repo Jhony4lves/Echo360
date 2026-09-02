@@ -38,11 +38,15 @@ extern uint32_t NetDll_accept(uint32_t caller, uint32_t socket_handle, void *add
 extern int NetDll_recv(uint32_t caller, uint32_t socket_handle, void *buffer, uint32_t length, uint32_t flags);
 extern int NetDll_send(uint32_t caller, uint32_t socket_handle, const void *buffer, uint32_t length, uint32_t flags);
 
+/*
+ * Volatile is intentional: this bootstrap links without libc. It prevents an
+ * optimizer from turning the loop into an implicit memset dependency.
+ */
 static void echo_zero(void *buffer, size_t length) {
-    uint8_t *bytes = (uint8_t *)buffer;
+    volatile uint8_t *bytes = (volatile uint8_t *)buffer;
     size_t i;
     for (i = 0; i < length; ++i) {
-        bytes[i] = 0;
+        bytes[i] = 0U;
     }
 }
 
