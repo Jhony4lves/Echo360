@@ -5,6 +5,7 @@ ROOT="${1:-/tmp/openxechain}"
 PREFIX="${OPENXECHAIN_SYSROOT:-/tmp/openxechain-sysroot}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 PARALLEL="${PARALLEL:-$(nproc)}"
+LLVM_PARALLEL="${LLVM_PARALLEL:-1}"
 HOST_CC="${HOST_CC:-clang}"
 HOST_CXX="${HOST_CXX:-clang++}"
 XBOX_TARGET="${XBOX_TARGET:-ppc32-unknown-xbox360}"
@@ -43,10 +44,14 @@ cmake \
   -DLLVM_INSTALL_CCTOOLS_SYMLINKS=true \
   -DLLVM_INSTALL_TOOLCHAIN_ONLY=true \
   -DLLVM_DISTRIBUTION_COMPONENTS="${LLVM_COMPONENTS}" \
+  -DLLVM_PARALLEL_LINK_JOBS=1 \
   -G Ninja
 
-cmake --build "${LLVM_BUILD}" --target distribution --parallel "${PARALLEL}"
-cmake --build "${LLVM_BUILD}" --target install-distribution --parallel "${PARALLEL}"
+# GitHub's hosted runner killed cc1plus while building Clang Sema with -j2.
+# Keep the memory-heavy LLVM/Clang phase strictly serial; xecorelib and
+# SynthXEX remain independently parallel below because they are much smaller.
+cmake --build "${LLVM_BUILD}" --target distribution --parallel "${LLVM_PARALLEL}"
+cmake --build "${LLVM_BUILD}" --target install-distribution --parallel "${LLVM_PARALLEL}"
 
 # llvm-dlltool and llvm-ar are the same multiplexer binary selected by argv[0].
 # install-distribution installs llvm-ar but omits the alias when only the parent
