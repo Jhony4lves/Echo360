@@ -19,9 +19,10 @@ class SaveVaultManifestCodecTest {
     )
 
     @Test
-    fun `round trip preserves manifest semantics`() {
+    fun `round trip preserves manifest semantics in canonical file order`() {
         val decoded = SaveVaultManifestCodec.decode(SaveVaultManifestCodec.encode(manifest))
-        assertEquals(manifest, decoded)
+        val canonicalExpected = manifest.copy(files = manifest.files.sortedBy { it.relativePath.lowercase() })
+        assertEquals(canonicalExpected, decoded)
         assertEquals(10L, decoded.totalBytes)
     }
 
