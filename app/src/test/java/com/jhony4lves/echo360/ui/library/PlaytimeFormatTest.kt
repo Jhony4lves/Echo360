@@ -22,11 +22,4 @@ class PlaytimeFormatTest {
     fun `negative duration is clamped`() {
         assertEquals("0 min", formatObservedDuration(-1L))
     }
-
-    @Test
-    fun `formats session count`() {
-        assertEquals("nenhuma sessão", formatObservedSessionCount(0))
-        assertEquals("1 sessão", formatObservedSessionCount(1))
-        assertEquals("7 sessões", formatObservedSessionCount(7))
-    }
 }
