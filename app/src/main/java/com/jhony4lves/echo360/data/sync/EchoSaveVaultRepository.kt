@@ -93,7 +93,8 @@ class EchoSaveVaultRepository(
                 if (cancellationToken.isCancelled()) throw VaultCancelledSignal
                 currentFile = remoteFile.relativePath
                 val destination = store.resolvePayloadFile(partialDirectory, remoteFile.relativePath)
-                check(destination.parentFile?.mkdirs() != false) {
+                val parent = requireNotNull(destination.parentFile)
+                check(parent.isDirectory || parent.mkdirs()) {
                     "Não foi possível criar a pasta local de ${remoteFile.relativePath}."
                 }
                 val digest = MessageDigest.getInstance("SHA-256")
