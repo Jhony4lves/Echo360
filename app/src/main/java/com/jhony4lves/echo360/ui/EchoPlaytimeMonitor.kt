@@ -1,0 +1,139 @@
+package com.jhony4lves.echo360.ui
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import com.jhony4lves.echo360.data.library.AuroraLibraryRepository
+import com.jhony4lves.echo360.data.library.CurrentTitleRepository
+import com.jhony4lves.echo360.data.library.LaunchAttemptStore
+import com.jhony4lves.echo360.data.library.PlaySessionStore
+import com.jhony4lves.echo360.data.library.PlayerStateStore
+import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
+import com.jhony4lves.echo360.domain.library.GameEntry
+import com.jhony4lves.echo360.domain.library.matchObservedGame
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
+
+/**
+ * Foreground-only runtime sampler used to build conservative local playtime and
+ * confirm app-issued launch attempts.
+ *
+ * NOVA is the production current-title source today. The sampler depends only
+ * on Title ID + optional Media ID, so a promoted EchoCore CURRENT_TITLE source
+ * can replace/precede NOVA later without inventing richer metadata.
+ *
+ * A network/auth failure is treated as unknown and never closes a session or
+ * rejects a launch attempt. An accepted launch is marked CONFIRMED only when
+ * the requested Title ID is actually observed within the bounded window owned
+ * by [LaunchAttemptStore]. No missing observation is interpreted as a crash.
+ *
+ * Leaving STARTED closes playtime at the last confirmed sample, so app-background
+ * time is not silently counted. No background service or persistent Xbox polling
+ * is started by this component.
+ */
+@Composable
+internal fun EchoPlaytimeMonitor() {
+    val appContext = LocalContext.current.applicationContext
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val libraryRepository = remember(appContext) { AuroraLibraryRepository(appContext) }
+    val currentTitleRepository = remember(appContext) { CurrentTitleRepository(appContext) }
+    val playerStore = remember(appContext) { PlayerStateStore(appContext) }
+    val playSessionStore = remember(appContext) { PlaySessionStore(appContext) }
+    val launchAttemptStore = remember(appContext) { LaunchAttemptStore(appContext) }
+    val configStore = remember(appContext) { SecureXboxConfigStore(appContext) }
+
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            var games: List<GameEntry> = emptyList()
+            var refreshCatalogAt = 0L
+
+            try {
+                // If Android killed the previous process before lifecycle teardown, an
+                // old active record may remain. Close it at its last saved observation
+                // before starting a fresh foreground observation window.
+                withContext(Dispatchers.IO) {
+                    playSessionStore.stopObserving()
+                }
+
+                while (coroutineContext.isActive) {
+                    val cycleStartedAt = System.currentTimeMillis()
+                    if (games.isEmpty() || cycleStartedAt >= refreshCatalogAt) {
+                        games = try {
+                            libraryRepository.loadCached()?.games.orEmpty()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Throwable) {
+                            games
+                        }
+                        refreshCatalogAt = cycleStartedAt + CATALOG_REFRESH_MS
+                    }
+
+                    val configured = withContext(Dispatchers.IO) {
+                        configStore.load() != null
+                    }
+                    if (!configured) {
+                        withContext(Dispatchers.IO) { playSessionStore.stopObserving() }
+                        delay(OFFLINE_SAMPLE_MS)
+                        continue
+                    }
+
+                    if (games.isEmpty()) {
+                        // Without a catalog mapping we cannot identify a game honestly.
+                        withContext(Dispatchers.IO) { playSessionStore.stopObserving() }
+                        delay(OFFLINE_SAMPLE_MS)
+                        continue
+                    }
+
+                    val observation = try {
+                        currentTitleRepository.observe()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Throwable) {
+                        null
+                    }
+
+                    if (observation == null) {
+                        // Source failure is unknown state, not evidence that play stopped
+                        // or that a prior launch request was rejected/crashed.
+                        delay(OFFLINE_SAMPLE_MS)
+                        continue
+                    }
+
+                    val observedAt = System.currentTimeMillis()
+                    val game = matchObservedGame(games, observation)
+                    withContext(Dispatchers.IO) {
+                        if (game != null) {
+                            playSessionStore.observe(game, observedAt)
+                            playerStore.markSeen(game, observedAt)
+                            launchAttemptStore.confirmObserved(game, observedAt)
+                        } else {
+                            // Source answered, but the active title is not one of the cached games.
+                            playSessionStore.observeNonGame(observedAt)
+                        }
+                    }
+
+                    delay(ONLINE_SAMPLE_MS)
+                }
+            } finally {
+                // The child job is already cancelled here; NonCancellable guarantees the
+                // last confirmed play session is closed before repeatOnLifecycle fully stops it.
+                withContext(NonCancellable + Dispatchers.IO) {
+                    playSessionStore.stopObserving()
+                }
+            }
+        }
+    }
+}
+
+private const val ONLINE_SAMPLE_MS = 60_000L
+private const val OFFLINE_SAMPLE_MS = 120_000L
+private const val CATALOG_REFRESH_MS = 5 * 60_000L

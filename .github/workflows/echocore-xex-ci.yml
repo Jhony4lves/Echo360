@@ -2,12 +2,6 @@ name: EchoCore XEX CI
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - echocore/prehardware-integration
-    paths:
-      - ".github/workflows/echocore-xex-ci.yml"
-      - "echocore/**"
   pull_request:
     paths:
       - ".github/workflows/echocore-xex-ci.yml"
@@ -23,7 +17,6 @@ permissions:
 env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
-  # PR #30 already proved and cached this exact pinned toolchain.
   ECHO_TOOLCHAIN_CACHE_KEY: echocore-openxechain-min-v2
 
 jobs:
@@ -110,7 +103,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Verify component-only toolchain
+      - name: Verify toolchain
         run: |
           test -x "$OPENXECHAIN_SYSROOT/bin/clang"
           test -x "$OPENXECHAIN_SYSROOT/bin/lld-link"
@@ -119,7 +112,6 @@ jobs:
           test -x "$OPENXECHAIN_SYSROOT/bin/synthxex"
           test -s "$OPENXECHAIN_SYSROOT/lib/xecorelib.a"
           "$OPENXECHAIN_SYSROOT/bin/clang" --version
-          "$OPENXECHAIN_SYSROOT/bin/synthxex" --help || true
 
   echocore-bundle:
     needs:

@@ -1,6 +1,12 @@
 package com.jhony4lves.echo360.network.nova
 
 import android.util.Base64
+import com.jhony4lves.echo360.domain.doctor.DashLaunchOption
+import com.jhony4lves.echo360.domain.doctor.DashLaunchSnapshot
+import com.jhony4lves.echo360.domain.doctor.DashLaunchVersion
+import com.jhony4lves.echo360.domain.doctor.DoctorMemorySnapshot
+import com.jhony4lves.echo360.domain.doctor.DoctorTemperatureSnapshot
+import com.jhony4lves.echo360.domain.doctor.DoctorTemperatureUnit
 import com.jhony4lves.echo360.domain.library.NowPlaying
 import com.jhony4lves.echo360.domain.xbox.XboxDevicePath
 import com.jhony4lves.echo360.domain.xbox.XboxEndpoint
@@ -20,9 +26,11 @@ import java.util.UUID
 /**
  * Safe authenticated subset of Aurora NOVA.
  *
- * This client intentionally exposes only runtime title and launch operations.
- * It does not request /system, CPU/DVD keys, serials, console IDs, or other
- * identity material. JWTs live only in process memory.
+ * This client exposes runtime title/launch operations, documented bounded
+ * remote actions, plus non-identity DashLaunch, RAM and temperature snapshots
+ * used by EchoDoctor. It intentionally does not request /system, CPU/DVD keys,
+ * serials, console IDs, or other identity material. JWTs live only in process
+ * memory.
  */
 class AuroraNovaClient(
     private val tcpProbe: TcpPortProbe = TcpPortProbe(),
@@ -36,6 +44,52 @@ class AuroraNovaClient(
     suspend fun nowPlaying(profile: XboxProfile): NowPlaying = withContext(Dispatchers.IO) {
         val payload = authenticatedJsonGet(profile, "/title")
         parseNowPlaying(payload)
+    }
+
+    suspend fun dashLaunch(profile: XboxProfile): DashLaunchSnapshot = withContext(Dispatchers.IO) {
+        val payload = authenticatedJsonGet(profile, "/dashlaunch")
+        parseDashLaunch(payload)
+    }
+
+    suspend fun doctorMemory(profile: XboxProfile): DoctorMemorySnapshot = withContext(Dispatchers.IO) {
+        parseDoctorMemory(authenticatedJsonGet(profile, "/memory"))
+    }
+
+    suspend fun doctorTemperature(profile: XboxProfile): DoctorTemperatureSnapshot = withContext(Dispatchers.IO) {
+        parseDoctorTemperature(authenticatedJsonGet(profile, "/temperature"))
+    }
+
+    /**
+     * NOVA 0.7b.2 r1622 documents POST /thread/state with suspend=1/0.
+     * This deliberately exposes only the boolean main-thread state instead of
+     * a generic arbitrary NOVA POST surface.
+     */
+    suspend fun setMainThreadSuspended(
+        profile: XboxProfile,
+        suspended: Boolean,
+    ) = withContext(Dispatchers.IO) {
+        val response = authenticatedMultipartPost(
+            profile = profile,
+            path = "/thread/state",
+            fields = linkedMapOf("suspend" to if (suspended) "1" else "0"),
+            retryAuth = true,
+        )
+        if (response.code != 202) {
+            throw NovaHttpException(
+                response.code,
+                response.body.ifBlank { "NOVA recusou a alteração do estado da thread principal." },
+            )
+        }
+    }
+
+    /**
+     * NOVA documents GET /screencapture/meta as the operation that takes a
+     * screenshot. The response is intentionally ignored here; EchoRemote only
+     * needs acknowledgement and never deletes screenshots automatically.
+     */
+    suspend fun takeScreenshot(profile: XboxProfile) = withContext(Dispatchers.IO) {
+        authenticatedJsonGet(profile, "/screencapture/meta")
+        Unit
     }
 
     suspend fun launch(
@@ -206,6 +260,67 @@ internal fun parseNowPlaying(payload: JSONObject): NowPlaying {
         resolutionHeight = resolution.optInt("height", 0),
         baseVersion = version.optString("base").takeIf(String::isNotBlank),
         currentVersion = version.optString("current").takeIf(String::isNotBlank),
+    )
+}
+
+internal fun parseDashLaunch(payload: JSONObject): DashLaunchSnapshot {
+    val optionsArray = payload.optJSONArray("options")
+    val options = buildList {
+        if (optionsArray != null) {
+            for (index in 0 until optionsArray.length()) {
+                val item = optionsArray.optJSONObject(index) ?: continue
+                add(
+                    DashLaunchOption(
+                        id = item.optLong("id", 0L),
+                        category = item.optString("category", "").trim(),
+                        name = item.optString("name", "").trim(),
+                        value = item.optString("value", ""),
+                    ),
+                )
+            }
+        }
+    }
+
+    val version = payload.optJSONObject("version") ?: JSONObject()
+    val number = version.optJSONObject("number") ?: JSONObject()
+    return DashLaunchSnapshot(
+        options = options,
+        version = DashLaunchVersion(
+            kernel = version.optLong("kernel", 0L),
+            major = number.optLong("major", 0L),
+            minor = number.optLong("minor", 0L),
+            build = number.optLong("build", 0L),
+        ),
+    )
+}
+
+internal fun parseDoctorMemory(payload: JSONObject): DoctorMemorySnapshot {
+    require(payload.has("free") && payload.has("used") && payload.has("total")) {
+        "NOVA /memory retornou um schema incompleto."
+    }
+    return DoctorMemorySnapshot(
+        freeBytes = payload.optLong("free", -1L),
+        usedBytes = payload.optLong("used", -1L),
+        totalBytes = payload.optLong("total", -1L),
+    )
+}
+
+internal fun parseDoctorTemperature(payload: JSONObject): DoctorTemperatureSnapshot {
+    require(
+        payload.has("cpu") && payload.has("gpu") && payload.has("memory") &&
+            payload.has("case") && payload.has("celsius"),
+    ) { "NOVA /temperature retornou um schema incompleto." }
+
+    return DoctorTemperatureSnapshot(
+        cpu = payload.optDouble("cpu", Double.NaN),
+        gpu = payload.optDouble("gpu", Double.NaN),
+        memory = payload.optDouble("memory", Double.NaN),
+        case = payload.optDouble("case", Double.NaN),
+        reportedUnit = if (payload.optBoolean("celsius", true)) {
+            DoctorTemperatureUnit.Celsius
+        } else {
+            DoctorTemperatureUnit.Fahrenheit
+        },
     )
 }
 

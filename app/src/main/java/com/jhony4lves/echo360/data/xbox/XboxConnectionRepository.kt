@@ -5,6 +5,8 @@ import com.jhony4lves.echo360.domain.xbox.TransportStatus
 import com.jhony4lves.echo360.domain.xbox.XboxConnectionSnapshot
 import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.domain.xbox.XboxTransport
+import com.jhony4lves.echo360.network.echolink.EchoLinkClient
+import com.jhony4lves.echo360.network.echolink.EchoLinkProtocolException
 import com.jhony4lves.echo360.network.ftp.FtpProtocolException
 import com.jhony4lves.echo360.network.ftp.FtpRoute
 import com.jhony4lves.echo360.network.ftp.FtpStageTimeoutException
@@ -18,11 +20,17 @@ import java.net.SocketTimeoutException
 import kotlin.system.measureTimeMillis
 
 class XboxConnectionRepository(
+    private val echoLinkClient: EchoLinkClient = EchoLinkClient(),
     private val novaClient: AuroraNovaClient = AuroraNovaClient(),
     private val ftpSessionFactory: XboxFtpSessionFactory = XboxFtpSessionFactory(),
 ) {
     suspend fun check(profile: XboxProfile): XboxConnectionSnapshot {
         val endpoint = profile.endpoint.validated()
+
+        val echoCore = echoCoreHealth(
+            host = endpoint.host,
+            port = endpoint.echoLinkPort,
+        )
 
         val novaResult = novaClient.probe(endpoint)
         val nova = TransportHealth(
@@ -51,11 +59,58 @@ class XboxConnectionRepository(
         )
 
         return XboxConnectionSnapshot(
+            echoCore = echoCore,
             nova = nova,
             auroraFtp = auroraFtp,
             ftpDll = ftpDll,
             checkedAtEpochMs = System.currentTimeMillis(),
         )
+    }
+
+    private suspend fun echoCoreHealth(host: String, port: Int): TransportHealth {
+        val startedAt = System.currentTimeMillis()
+        return try {
+            val pong = echoLinkClient.ping(host, port)
+            TransportHealth(
+                transport = XboxTransport.EchoCore,
+                status = TransportStatus.Connected,
+                detail = "EchoCore confirmou PONG v${pong.protocolVersion} com requestId e nonce válidos. Bootstrap read-only; pairing/CAPS ainda não foram executados.",
+                latencyMs = pong.latencyMs,
+            )
+        } catch (error: Throwable) {
+            val elapsed = System.currentTimeMillis() - startedAt
+            val status = when (error) {
+                is EchoLinkProtocolException, is EOFException -> TransportStatus.ProtocolError
+                is ConnectException, is SocketTimeoutException -> TransportStatus.Unreachable
+                is IOException -> TransportStatus.Unreachable
+                else -> TransportStatus.ProtocolError
+            }
+            val detail = when (error) {
+                is EchoLinkProtocolException ->
+                    "A porta $port respondeu, mas não completou um PING/PONG EchoLink v1 válido: ${safeError(error)}"
+
+                is EOFException ->
+                    "A porta $port aceitou a conexão e fechou antes do PONG EchoLink."
+
+                is ConnectException ->
+                    "EchoCore não está escutando na porta $port. Isso é esperado enquanto o XEX/plugin não estiver ativo."
+
+                is SocketTimeoutException ->
+                    "EchoCore não completou o PING/PONG na porta $port dentro do timeout. • $elapsed ms"
+
+                is IOException ->
+                    "Falha de rede ao validar EchoCore na porta $port: ${safeError(error)}"
+
+                else ->
+                    "Falha ao validar EchoCore na porta $port: ${safeError(error)}"
+            }
+            TransportHealth(
+                transport = XboxTransport.EchoCore,
+                status = status,
+                detail = detail,
+                latencyMs = elapsed,
+            )
+        }
     }
 
     private suspend fun ftpHealth(
@@ -72,7 +127,7 @@ class XboxConnectionRepository(
             XboxTransport.FtpDll ->
                 credentials.ftpDllUsername.isNotBlank() && credentials.ftpDllPassword.isNotBlank()
 
-            XboxTransport.Nova -> true
+            XboxTransport.EchoCore, XboxTransport.Nova -> true
         }
 
         if (!configured) {
@@ -103,6 +158,7 @@ class XboxConnectionRepository(
                     XboxTransport.FtpDll ->
                         "Background validado: login + PORT + LIST da raiz ($rootEntries entradas)."
 
+                    XboxTransport.EchoCore -> "EchoCore validado."
                     XboxTransport.Nova -> "Conectado."
                 },
                 latencyMs = elapsed,
@@ -177,4 +233,8 @@ class XboxConnectionRepository(
             latencyMs = elapsedMs,
         )
     }
+
+    private fun safeError(error: Throwable): String =
+        error.message?.replace('\n', ' ')?.replace('\r', ' ')?.take(220)?.ifBlank { null }
+            ?: error::class.simpleName.orEmpty().ifBlank { "erro de transporte" }
 }

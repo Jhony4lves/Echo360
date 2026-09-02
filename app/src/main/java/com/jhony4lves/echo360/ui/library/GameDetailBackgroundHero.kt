@@ -66,93 +66,110 @@ internal fun GameDetailBackgroundHero(
     }
     val shape = RoundedCornerShape(16.dp)
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
-            .clip(shape)
-            .background(
-                Brush.horizontalGradient(
-                    listOf(
-                        EchoColors.XboxGreen.copy(alpha = 0.24f),
-                        EchoColors.SurfaceHigh,
-                        EchoColors.Void,
-                    ),
-                ),
-            ),
+    Column(
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        if (bitmap != null) {
-            Image(
-                bitmap = requireNotNull(bitmap),
-                contentDescription = "Background de ${game.title}",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                EchoColors.Void.copy(alpha = 0.05f),
-                                EchoColors.Void.copy(alpha = 0.28f),
-                                EchoColors.Void.copy(alpha = 0.88f),
-                            ),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(shape)
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            EchoColors.XboxGreen.copy(alpha = 0.24f),
+                            EchoColors.SurfaceHigh,
+                            EchoColors.Void,
                         ),
                     ),
-            )
-        }
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(14.dp),
+                ),
         ) {
-            EchoEyebrow(if (bitmap != null) "AURORA BACKGROUND" else "GAME ART")
-            Spacer(Modifier.height(4.dp))
-            Text(
-                game.title,
-                style = MaterialTheme.typography.titleLarge,
-                color = EchoColors.Text,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            message?.takeIf { it.isNotBlank() }?.let { status ->
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    status,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = EchoColors.TextSecondary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+            if (bitmap != null) {
+                Image(
+                    bitmap = requireNotNull(bitmap),
+                    contentDescription = "Background de ${game.title}",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    EchoColors.Void.copy(alpha = 0.05f),
+                                    EchoColors.Void.copy(alpha = 0.28f),
+                                    EchoColors.Void.copy(alpha = 0.88f),
+                                ),
+                            ),
+                        ),
                 )
             }
-        }
 
-        if (loading) {
-            CircularProgressIndicator(
+            Column(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(14.dp)
-                    .size(22.dp),
-                strokeWidth = 2.dp,
-                color = EchoColors.NeonGreen,
-            )
-        } else if (bitmap == null) {
-            Button(
-                onClick = onRetry,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = EchoColors.SurfaceBright.copy(alpha = 0.92f),
-                    contentColor = EchoColors.NeonGreen,
-                ),
-                shape = RoundedCornerShape(10.dp),
+                    .align(Alignment.BottomStart)
+                    .padding(14.dp),
             ) {
-                Text("BUSCAR FUNDO")
+                EchoEyebrow(if (bitmap != null) "AURORA BACKGROUND" else "GAME ART")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    game.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = EchoColors.Text,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                message?.takeIf { it.isNotBlank() }?.let { status ->
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = EchoColors.TextSecondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(14.dp)
+                        .size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = EchoColors.NeonGreen,
+                )
+            } else if (bitmap == null) {
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = EchoColors.SurfaceBright.copy(alpha = 0.92f),
+                        contentColor = EchoColors.NeonGreen,
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text("BUSCAR FUNDO")
+                }
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+        GameCapabilityMetadataEditor(game)
+        Spacer(Modifier.height(12.dp))
+        GamePlaytimeTimeline(game)
+        Spacer(Modifier.height(12.dp))
+        GameIntegritySummary(game)
+        Spacer(Modifier.height(12.dp))
+        GameRuntimeIdentitySummary(game)
+        Spacer(Modifier.height(12.dp))
+        GameLaunchReadinessSummary(game)
+        Spacer(Modifier.height(12.dp))
+        GameLaunchContextTimeline(game)
     }
 }

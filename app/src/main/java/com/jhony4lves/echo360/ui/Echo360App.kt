@@ -17,12 +17,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.ui.components.EchoBackdrop
 import com.jhony4lves.echo360.ui.components.EchoNavGlyph
+import com.jhony4lves.echo360.ui.doctor.EchoDoctorScreen
 import com.jhony4lves.echo360.ui.home.EchoPlayerHomeScreen
 import com.jhony4lves.echo360.ui.library.EchoPlayerLibraryScreen
-import com.jhony4lves.echo360.ui.system.XboxSystemScreen
+import com.jhony4lves.echo360.ui.stats.EchoStatsScreen
+import com.jhony4lves.echo360.ui.system.XboxHubScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
 import com.jhony4lves.echo360.ui.theme.EchoTheme
-import com.jhony4lves.echo360.ui.transfer.EchoTransferHostScreen
+import com.jhony4lves.echo360.ui.transfer.EchoFilesHubScreen
 
 private enum class EchoDestination(
     val shortLabel: String,
@@ -31,12 +33,15 @@ private enum class EchoDestination(
     Home("Home", "HM"),
     Library("Jogos", "LB"),
     Transfer("Transfer", "TX"),
+    Stats("Stats", "ST"),
+    Doctor("Doctor", "DR"),
     System("Xbox", "XB"),
 }
 
 @Composable
 fun Echo360App() {
     EchoTheme {
+        EchoPlaytimeMonitor()
         var destination by remember { mutableStateOf(EchoDestination.Home) }
 
         EchoBackdrop {
@@ -78,11 +83,19 @@ fun Echo360App() {
                         modifier = Modifier.padding(innerPadding),
                     )
 
-                    EchoDestination.Transfer -> EchoTransferHostScreen(
+                    EchoDestination.Transfer -> EchoFilesHubScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
 
-                    EchoDestination.System -> XboxSystemScreen(
+                    EchoDestination.Stats -> EchoStatsScreen(
+                        modifier = Modifier.padding(innerPadding),
+                    )
+
+                    EchoDestination.Doctor -> EchoDoctorScreen(
+                        modifier = Modifier.padding(innerPadding),
+                    )
+
+                    EchoDestination.System -> XboxHubScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
                 }
