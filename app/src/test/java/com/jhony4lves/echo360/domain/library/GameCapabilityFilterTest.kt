@@ -1,5 +1,6 @@
 package com.jhony4lves.echo360.domain.library
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -25,6 +26,11 @@ class GameCapabilityFilterTest {
         ),
         games[2].titleId to GameCapabilityMetadata(),
     )
+
+    @After
+    fun clearCatalog() {
+        GameCapabilityCatalog.replace(emptyMap())
+    }
 
     @Test
     fun `Kinect filter includes only explicitly supported or required games`() {
@@ -87,6 +93,56 @@ class GameCapabilityFilterTest {
 
         assertEquals(listOf("Dance"), dance.map { it.title })
         assertFalse(inferred.any { it.title == "Dance" })
+    }
+
+    @Test
+    fun `existing Library filter row can consume hydrated Kinect metadata without UI wiring`() {
+        GameCapabilityCatalog.replace(metadata)
+
+        val filtered = filterLibraryGames(
+            games = games,
+            states = states,
+            filter = LibraryFilter.Kinect,
+            query = "",
+        )
+
+        assertEquals(listOf("Dance"), filtered.map { it.title })
+    }
+
+    @Test
+    fun `existing Library filter row can consume hydrated local multiplayer metadata`() {
+        GameCapabilityCatalog.replace(metadata)
+
+        val filtered = filterLibraryGames(
+            games = games,
+            states = states,
+            filter = LibraryFilter.LocalMultiplayer,
+            query = "",
+        )
+
+        assertEquals(listOf("Couch Racer"), filtered.map { it.title })
+    }
+
+    @Test
+    fun `Genre chip exposes only explicitly categorized games and query can refine them`() {
+        GameCapabilityCatalog.replace(metadata)
+
+        val categorized = filterLibraryGames(
+            games = games,
+            states = states,
+            filter = LibraryFilter.Genre,
+            query = "",
+        )
+        val racing = filterLibraryGames(
+            games = games,
+            states = states,
+            filter = LibraryFilter.Genre,
+            query = "corrida",
+        )
+
+        assertEquals(listOf("Couch Racer", "Dance"), categorized.map { it.title })
+        assertEquals(listOf("Couch Racer"), racing.map { it.title })
+        assertFalse(categorized.any { it.title == "Unknown Game" })
     }
 
     @Test
