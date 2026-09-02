@@ -1,6 +1,7 @@
 #ifndef ECHO_PROTOCOL_H
 #define ECHO_PROTOCOL_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define ECHO_MAGIC_0 0x45U /* E */
@@ -14,6 +15,26 @@
 #define ECHO_HEADER_BYTES 16U
 #define ECHO_PING_PAYLOAD_BYTES 8U
 
+/*
+ * Hard resident-memory/frame ceiling for EchoLink v1. 96 KiB comfortably fits
+ * authenticated 64 KiB transfer chunks and the current 68,356-byte maximum
+ * DIR_LIST response while preventing a peer from forcing unbounded allocation.
+ */
+#define ECHO_FRAME_MAX_PAYLOAD_BYTES (96U * 1024U)
+
+#define ECHO_FRAME_OK 0
+#define ECHO_FRAME_BAD_MAGIC -1
+#define ECHO_FRAME_BAD_VERSION -2
+#define ECHO_FRAME_TOO_LARGE -3
+#define ECHO_FRAME_INVALID_ARGUMENT -4
+
+typedef struct echo_frame_header {
+    uint8_t type;
+    uint16_t flags;
+    uint32_t payload_length;
+    uint32_t request_id;
+} echo_frame_header;
+
 static inline uint16_t echo_read_be16(const uint8_t *bytes) {
     return (uint16_t)(((uint16_t)bytes[0] << 8U) | (uint16_t)bytes[1]);
 }
@@ -25,11 +46,57 @@ static inline uint32_t echo_read_be32(const uint8_t *bytes) {
            (uint32_t)bytes[3];
 }
 
+static inline void echo_write_be16(uint8_t *bytes, uint16_t value) {
+    bytes[0] = (uint8_t)(value >> 8U);
+    bytes[1] = (uint8_t)value;
+}
+
 static inline void echo_write_be32(uint8_t *bytes, uint32_t value) {
     bytes[0] = (uint8_t)(value >> 24U);
     bytes[1] = (uint8_t)(value >> 16U);
     bytes[2] = (uint8_t)(value >> 8U);
     bytes[3] = (uint8_t)value;
+}
+
+static inline int echo_parse_frame_header(
+    const uint8_t raw[ECHO_HEADER_BYTES],
+    echo_frame_header *out
+) {
+    uint32_t payload_length;
+
+    if (raw == NULL || out == NULL) return ECHO_FRAME_INVALID_ARGUMENT;
+    if (raw[0] != ECHO_MAGIC_0 || raw[1] != ECHO_MAGIC_1 ||
+        raw[2] != ECHO_MAGIC_2 || raw[3] != ECHO_MAGIC_3) {
+        return ECHO_FRAME_BAD_MAGIC;
+    }
+    if (raw[4] != ECHO_VERSION) return ECHO_FRAME_BAD_VERSION;
+
+    payload_length = echo_read_be32(raw + 8U);
+    if (payload_length > ECHO_FRAME_MAX_PAYLOAD_BYTES) return ECHO_FRAME_TOO_LARGE;
+
+    out->type = raw[5];
+    out->flags = echo_read_be16(raw + 6U);
+    out->payload_length = payload_length;
+    out->request_id = echo_read_be32(raw + 12U);
+    return ECHO_FRAME_OK;
+}
+
+static inline void echo_make_frame_header(
+    uint8_t raw[ECHO_HEADER_BYTES],
+    uint8_t type,
+    uint16_t flags,
+    uint32_t payload_length,
+    uint32_t request_id
+) {
+    raw[0] = ECHO_MAGIC_0;
+    raw[1] = ECHO_MAGIC_1;
+    raw[2] = ECHO_MAGIC_2;
+    raw[3] = ECHO_MAGIC_3;
+    raw[4] = ECHO_VERSION;
+    raw[5] = type;
+    echo_write_be16(raw + 6U, flags);
+    echo_write_be32(raw + 8U, payload_length);
+    echo_write_be32(raw + 12U, request_id);
 }
 
 /*
@@ -38,21 +105,12 @@ static inline void echo_write_be32(uint8_t *bytes, uint32_t value) {
  * parser tiny and makes future protocol growth explicit instead of accidental.
  */
 static inline int echo_validate_ping_header(const uint8_t header[ECHO_HEADER_BYTES]) {
-    if (header[0] != ECHO_MAGIC_0 ||
-        header[1] != ECHO_MAGIC_1 ||
-        header[2] != ECHO_MAGIC_2 ||
-        header[3] != ECHO_MAGIC_3) {
-        return -1;
-    }
-    if (header[4] != ECHO_VERSION || header[5] != ECHO_TYPE_PING) {
-        return -2;
-    }
-    if (echo_read_be16(header + 6U) != 0U) {
-        return -3;
-    }
-    if (echo_read_be32(header + 8U) != ECHO_PING_PAYLOAD_BYTES) {
-        return -4;
-    }
+    echo_frame_header parsed;
+    int result = echo_parse_frame_header(header, &parsed);
+    if (result != ECHO_FRAME_OK) return result;
+    if (parsed.type != ECHO_TYPE_PING) return -5;
+    if (parsed.flags != 0U) return -3;
+    if (parsed.payload_length != ECHO_PING_PAYLOAD_BYTES) return -4;
     return 0;
 }
 
