@@ -11,6 +11,7 @@
  * - one TCP listener on port 36000
  * - one client
  * - one strict EchoLink PING -> PONG exchange
+ * - bounded 30 second connection window
  * - no heap, filesystem, launch, NAND or memory-control APIs
  * - always closes sockets and returns to the loader
  *
@@ -25,6 +26,13 @@
 #define ECHO_INVALID_SOCKET 0xFFFFFFFFU
 #define ECHO_PORT_HIGH 0x8CU /* 36000 == 0x8CA0 */
 #define ECHO_PORT_LOW 0xA0U
+#define ECHO_SOL_SOCKET 0xFFFFU
+#define ECHO_SO_REUSEADDR 0x0004U
+#define ECHO_FIONBIO 0x8004667EU
+#define ECHO_ACCEPT_POLL_MS 100U
+#define ECHO_ACCEPT_POLLS 300U
+#define ECHO_KERNEL_MODE 0U
+#define ECHO_NOT_ALERTABLE 0U
 
 extern int NetDll_XNetStartup(uint32_t caller, void *params);
 extern int NetDll_XNetCleanup(uint32_t caller, void *params);
@@ -32,11 +40,26 @@ extern int NetDll_WSAStartup(uint32_t caller, uint16_t version, void *data);
 extern int NetDll_WSACleanup(uint32_t caller);
 extern uint32_t NetDll_socket(uint32_t caller, uint32_t af, uint32_t type, uint32_t protocol);
 extern int NetDll_closesocket(uint32_t caller, uint32_t socket_handle);
+extern int NetDll_setsockopt(
+    uint32_t caller,
+    uint32_t socket_handle,
+    uint32_t level,
+    uint32_t option_name,
+    const void *option_value,
+    uint32_t option_length
+);
+extern int NetDll_ioctlsocket(
+    uint32_t caller,
+    uint32_t socket_handle,
+    uint32_t command,
+    uint32_t *argument
+);
 extern int NetDll_bind(uint32_t caller, uint32_t socket_handle, const void *name, uint32_t name_length);
 extern int NetDll_listen(uint32_t caller, uint32_t socket_handle, int backlog);
 extern uint32_t NetDll_accept(uint32_t caller, uint32_t socket_handle, void *address, uint32_t *address_length);
 extern int NetDll_recv(uint32_t caller, uint32_t socket_handle, void *buffer, uint32_t length, uint32_t flags);
 extern int NetDll_send(uint32_t caller, uint32_t socket_handle, const void *buffer, uint32_t length, uint32_t flags);
+extern int KeDelayExecutionThread(uint32_t processor_mode, uint32_t alertable, int64_t *interval_ptr);
 
 /*
  * Volatile is intentional: this bootstrap links without libc. It prevents an
@@ -48,6 +71,12 @@ static void echo_zero(void *buffer, size_t length) {
     for (i = 0; i < length; ++i) {
         bytes[i] = 0U;
     }
+}
+
+static void echo_delay_ms(uint32_t milliseconds) {
+    /* KeDelayExecutionThread uses relative 100 ns intervals when negative. */
+    int64_t interval = -(int64_t)milliseconds * 10000LL;
+    (void)KeDelayExecutionThread(ECHO_KERNEL_MODE, ECHO_NOT_ALERTABLE, &interval);
 }
 
 static int echo_recv_exact(uint32_t socket_handle, void *buffer, uint32_t length) {
@@ -116,6 +145,50 @@ static int echo_handle_ping(uint32_t client) {
     return 0;
 }
 
+static uint32_t echo_accept_bounded(uint32_t server, uint8_t *peer_address) {
+    uint32_t nonblocking = 1U;
+    uint32_t blocking = 0U;
+    uint32_t poll;
+
+    if (NetDll_ioctlsocket(
+            ECHO_CALLER_TITLE,
+            server,
+            ECHO_FIONBIO,
+            &nonblocking
+        ) != 0) {
+        return ECHO_INVALID_SOCKET;
+    }
+
+    for (poll = 0U; poll < ECHO_ACCEPT_POLLS; ++poll) {
+        uint32_t peer_address_length = 16U;
+        uint32_t client = NetDll_accept(
+            ECHO_CALLER_TITLE,
+            server,
+            peer_address,
+            &peer_address_length
+        );
+
+        if (client != ECHO_INVALID_SOCKET) {
+            /* Accepted sockets may inherit nonblocking state. PING is tiny and
+             * simpler/safer as a blocking exact-read after connection exists. */
+            if (NetDll_ioctlsocket(
+                    ECHO_CALLER_TITLE,
+                    client,
+                    ECHO_FIONBIO,
+                    &blocking
+                ) != 0) {
+                (void)NetDll_closesocket(ECHO_CALLER_TITLE, client);
+                return ECHO_INVALID_SOCKET;
+            }
+            return client;
+        }
+
+        echo_delay_ms(ECHO_ACCEPT_POLL_MS);
+    }
+
+    return ECHO_INVALID_SOCKET;
+}
+
 /*
  * OpenXeChain's Xbox 360 linker selects /ENTRY:_start for title executables.
  * Returning is deliberate for this first hardware proof: the bootstrap serves
@@ -125,9 +198,9 @@ void _start(void) {
     uint8_t wsa_data[0x200];
     uint8_t listen_address[16];
     uint8_t peer_address[16];
-    uint32_t peer_address_length = 16U;
     uint32_t server = ECHO_INVALID_SOCKET;
     uint32_t client = ECHO_INVALID_SOCKET;
+    uint32_t reuse_address = 1U;
     int xnet_started = 0;
     int wsa_started = 0;
 
@@ -157,6 +230,17 @@ void _start(void) {
         goto cleanup;
     }
 
+    if (NetDll_setsockopt(
+            ECHO_CALLER_TITLE,
+            server,
+            ECHO_SOL_SOCKET,
+            ECHO_SO_REUSEADDR,
+            &reuse_address,
+            sizeof(reuse_address)
+        ) != 0) {
+        goto cleanup;
+    }
+
     if (NetDll_bind(ECHO_CALLER_TITLE, server, listen_address, sizeof(listen_address)) != 0) {
         goto cleanup;
     }
@@ -164,12 +248,7 @@ void _start(void) {
         goto cleanup;
     }
 
-    client = NetDll_accept(
-        ECHO_CALLER_TITLE,
-        server,
-        peer_address,
-        &peer_address_length
-    );
+    client = echo_accept_bounded(server, peer_address);
     if (client == ECHO_INVALID_SOCKET) {
         goto cleanup;
     }
