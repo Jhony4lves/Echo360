@@ -67,12 +67,15 @@ class EchoTuRepository(
         profile: com.jhony4lves.echo360.domain.xbox.XboxProfile,
     ): RuntimeTitleUpdateObservation? = try {
         val now = novaClient.nowPlaying(profile)
-        if (now.titleId == 0L) return null
-        RuntimeTitleUpdateObservation(
-            titleIdHex = now.titleIdHex,
-            mediaIdHex = now.mediaIdHex.takeUnless { now.mediaId == 0L },
-            reportedTuVersion = now.titleUpdateVersion.coerceAtLeast(0),
-        )
+        if (now.titleId == 0L) {
+            null
+        } else {
+            RuntimeTitleUpdateObservation(
+                titleIdHex = now.titleIdHex,
+                mediaIdHex = now.mediaIdHex.takeUnless { now.mediaId == 0L },
+                reportedTuVersion = now.titleUpdateVersion.coerceAtLeast(0),
+            )
+        }
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Throwable) {
