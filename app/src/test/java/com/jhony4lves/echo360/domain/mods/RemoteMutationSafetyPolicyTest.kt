@@ -55,6 +55,17 @@ class RemoteMutationSafetyPolicyTest {
     }
 
     @Test
+    fun `traversal cannot masquerade as a covered child target`() {
+        val decision = RemoteMutationSafetyPolicy.evaluate(
+            targetCanonicalPath = "/Hdd1/Content/0000000000000000/465307E4/../545408A7/file",
+            rollbackManifest = manifest,
+            rollbackIntegrity = goodReport(),
+        )
+        assertFalse(decision.approved)
+        assertEquals(RemoteMutationSafetyCode.UnsafeTargetPath, decision.code)
+    }
+
+    @Test
     fun `tampered incomplete or extra rollback is blocked`() {
         val invalid = goodReport().copy(
             findings = listOf(
