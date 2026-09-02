@@ -9,6 +9,7 @@
 
 #define ECHO_TRANSFER_SHA256_BYTES 32U
 #define ECHO_TRANSFER_NATIVE_PATH_BYTES 320U
+#define ECHO_TRANSFER_WRITER_MAGIC UINT32_C(0x45575231) /* EWR1 */
 
 typedef enum echo_transfer_writer_result {
     ECHO_WRITER_OK = 0,
@@ -22,6 +23,7 @@ typedef enum echo_transfer_writer_result {
 } echo_transfer_writer_result;
 
 typedef struct echo_transfer_writer {
+    uint32_t magic;
     HANDLE file_handle;
     echo_transfer_state transfer;
     CRYPT_SHA256_STATE sha256;
@@ -29,13 +31,15 @@ typedef struct echo_transfer_writer {
     uint8_t opened;
 } echo_transfer_writer;
 
+/* Must be called once before first use; never closes an active handle. */
 void echo_transfer_writer_reset(echo_transfer_writer *writer);
 
 /*
  * Open/create <final>.echo.part and initialize the incremental SHA-256 state.
- * If resume_offset > 0, the existing part file must be exactly that size and
- * is re-hashed using caller-owned scratch memory before any new chunk is
- * accepted. scratch may be NULL for a fresh transfer.
+ * The writer must already have been initialized with reset() and must not have
+ * an active transfer. If resume_offset > 0, the existing part file must be
+ * exactly that size and is re-hashed using caller-owned scratch memory before
+ * any new chunk is accepted. scratch may be NULL for a fresh transfer.
  */
 int echo_transfer_writer_open(
     echo_transfer_writer *writer,
