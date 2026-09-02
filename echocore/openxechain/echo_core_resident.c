@@ -53,6 +53,9 @@ static uint8_t g_echo_resident_secret[ECHO_AUTH_SECRET_BYTES];
 static int g_echo_resident_last_pairing_status = ECHO_PAIRING_STORE_NOT_FOUND;
 static int g_echo_resident_last_server_status = ECHO_NET_STOPPED;
 
+/* SynthXEX v0.0.5 needs raw data in the final PE section for RVA mapping. */
+static volatile uint32_t g_echo_synthxex_data_anchor = UINT32_C(0x4543484F);
+
 static void echo_resident_secure_zero(void *buffer, size_t length) {
     volatile uint8_t *bytes = (volatile uint8_t *)buffer;
     size_t i;
@@ -89,7 +92,12 @@ done:
 
 static int echo_resident_attach(void) {
     uint32_t handle = ECHO_RESIDENT_THREAD_HANDLE_NONE;
+    uint32_t synthxex_anchor;
     int status;
+
+    /* Keep initialized .data live for the pinned SynthXEX import walker. */
+    synthxex_anchor = g_echo_synthxex_data_anchor;
+    (void)synthxex_anchor;
 
     /* Duplicate process-attach must never create another listener/thread. */
     if (g_echo_resident_thread_handle != ECHO_RESIDENT_THREAD_HANDLE_NONE) {
