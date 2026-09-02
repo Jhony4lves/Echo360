@@ -29,6 +29,14 @@ extern int KeDelayExecutionThread(
 
 static uint16_t g_echo_pairing_message[ECHO_PAIRING_MESSAGE_CAPACITY];
 
+/*
+ * SynthXEX v0.0.5 assumes the final PE section has raw file data when it maps
+ * IAT offsets back to RVAs. A BSS-only final .data section makes its
+ * offsetToRVA() reject every file offset. Keep one initialized, referenced
+ * datum in .data until the upstream converter fixes that assumption.
+ */
+static volatile uint32_t g_echo_synthxex_data_anchor = UINT32_C(0x4543484F);
+
 static void echo_pairing_xex_zero(void *memory, uint32_t length) {
     volatile uint8_t *bytes = (volatile uint8_t *)memory;
     uint32_t i;
@@ -91,8 +99,12 @@ void _start(void) {
     uint8_t token[ECHO_PAIRING_TOKEN_BYTES];
     uint8_t secret[ECHO_AUTH_SECRET_BYTES];
     char display[ECHO_PAIRING_TOKEN_DISPLAY_CAPACITY];
+    uint32_t synthxex_anchor;
     int load_result;
     int store_result;
+
+    synthxex_anchor = g_echo_synthxex_data_anchor;
+    (void)synthxex_anchor;
 
     echo_pairing_xex_zero(existing_secret, sizeof(existing_secret));
     echo_pairing_xex_zero(token, sizeof(token));
