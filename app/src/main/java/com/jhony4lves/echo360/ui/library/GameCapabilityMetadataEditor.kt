@@ -131,7 +131,10 @@ internal fun GameCapabilityMetadataEditor(game: GameEntry) {
                 Button(
                     onClick = {
                         val players = localPlayersText.toIntOrNull()
-                        if (localPlayersText.isNotBlank() && players !in 1..16) {
+                        if (
+                            localPlayersText.isNotBlank() &&
+                            (players == null || players !in 1..16)
+                        ) {
                             message = "Jogadores locais precisa ficar entre 1 e 16."
                         } else {
                             val saved = store.save(
