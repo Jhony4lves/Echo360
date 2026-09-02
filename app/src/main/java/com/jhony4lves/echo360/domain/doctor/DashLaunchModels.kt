@@ -1,5 +1,8 @@
 package com.jhony4lves.echo360.domain.doctor
 
+import com.jhony4lves.echo360.domain.integrity.IntegrityFinding
+import com.jhony4lves.echo360.domain.integrity.IntegritySeverity
+
 data class DashLaunchOption(
     val id: Long,
     val category: String,
@@ -46,4 +49,22 @@ data class DashLaunchPlugin(
 ) {
     val configured: Boolean
         get() = path.isNotBlank() && !path.equals("null", ignoreCase = true)
+}
+
+data class DashLaunchDoctorReport(
+    val snapshot: DashLaunchSnapshot,
+    val findings: List<IntegrityFinding>,
+    val checkedAtEpochMs: Long,
+) {
+    val errors: Int
+        get() = findings.count { it.severity == IntegritySeverity.Error }
+
+    val warnings: Int
+        get() = findings.count { it.severity == IntegritySeverity.Warning }
+
+    val info: Int
+        get() = findings.count { it.severity == IntegritySeverity.Info }
+
+    val healthy: Boolean
+        get() = errors == 0 && warnings == 0
 }
