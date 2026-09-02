@@ -33,14 +33,14 @@ done
 mkdir -p "${OUT_DIR}"
 rm -f "${PE}" "${XEX}"
 
+# The pinned OpenXeChain PowerPC/COFF backend cannot safely use function/data
+# sections: its one_only COMDAT emission leaves definition symbols undefined.
 "${CLANG}" \
   -std=c11 \
   -Os \
   -ffreestanding \
   -fno-builtin \
   -nostdlib \
-  -ffunction-sections \
-  -fdata-sections \
   -Wall \
   -Wextra \
   -Werror \
