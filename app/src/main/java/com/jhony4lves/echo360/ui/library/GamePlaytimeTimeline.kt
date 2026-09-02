@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -74,6 +75,7 @@ internal fun GamePlaytimeTimeline(game: GameEntry) {
             }
             if (summary == null) {
                 CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
                     strokeWidth = 2.dp,
                     color = EchoColors.NeonGreen,
                 )
@@ -93,7 +95,7 @@ internal fun GamePlaytimeTimeline(game: GameEntry) {
                 )
                 PlaytimeMetric(
                     label = "SESSÕES",
-                    value = formatObservedSessionCount(current.sessionCount),
+                    value = current.sessionCount.toString(),
                     modifier = Modifier.weight(1f),
                 )
             }
