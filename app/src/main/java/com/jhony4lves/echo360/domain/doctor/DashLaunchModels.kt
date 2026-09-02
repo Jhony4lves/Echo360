@@ -45,5 +45,5 @@ data class DashLaunchPlugin(
     val path: String,
 ) {
     val configured: Boolean
-        get() = path.isNotBlank()
+        get() = path.isNotBlank() && !path.equals("null", ignoreCase = true)
 }
