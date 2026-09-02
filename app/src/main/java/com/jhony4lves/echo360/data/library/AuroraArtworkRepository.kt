@@ -8,6 +8,7 @@ import com.jhony4lves.echo360.domain.library.LibrarySnapshot
 import com.jhony4lves.echo360.network.ftp.FtpRoute
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -24,14 +25,21 @@ class AuroraArtworkRepository(
     private val root = File(appContext.filesDir, "echo-library-artwork-v1")
     private val rawDir = File(root, "raw").apply { mkdirs() }
     private val coverDir = File(root, "covers").apply { mkdirs() }
+    private val backgroundRawDir = File(root, "background-raw").apply { mkdirs() }
+    private val backgroundDir = File(root, "backgrounds").apply { mkdirs() }
 
     fun cachedCover(game: GameEntry): File? =
         coverFile(game).takeIf { it.isFile && it.length() > 0L }
+
+    fun cachedBackground(game: GameEntry): File? =
+        backgroundFile(game).takeIf { it.isFile && it.length() > 0L }
 
     fun clear() {
         root.deleteRecursively()
         rawDir.mkdirs()
         coverDir.mkdirs()
+        backgroundRawDir.mkdirs()
+        backgroundDir.mkdirs()
     }
 
     suspend fun syncCovers(
@@ -40,15 +48,40 @@ class AuroraArtworkRepository(
     ): ArtworkSyncResult = withContext(Dispatchers.IO) {
         val profile = configStore.load() ?: error("Configure o Xbox na aba Xbox primeiro.")
         val routed = sessionFactory.connect(profile, FtpRoute.Auto)
+        val session = routed.session
         try {
             syncCoversWithSession(
-                session = routed.session,
+                session = session,
                 snapshot = snapshot,
                 route = routed.route,
                 onProgress = onProgress,
             )
         } finally {
-            runCatching { routed.session.close() }
+            runCatching { session.close() }
+        }
+    }
+
+    /**
+     * Fetches the selected game's Aurora background only when the detail view asks
+     * for it. This intentionally avoids bulk-downloading BK assets for a large
+     * collection. Existing valid cache is reused when the remote SIZE is unchanged.
+     */
+    suspend fun fetchBackground(
+        snapshot: LibrarySnapshot,
+        game: GameEntry,
+    ): ArtworkFetchResult = withContext(Dispatchers.IO) {
+        val profile = configStore.load() ?: error("Configure o Xbox na aba Xbox primeiro.")
+        val routed = sessionFactory.connect(profile, FtpRoute.Auto)
+        val session = routed.session
+        try {
+            fetchBackgroundWithSession(
+                session = session,
+                snapshot = snapshot,
+                game = game,
+                route = routed.route,
+            )
+        } finally {
+            runCatching { session.close() }
         }
     }
 
@@ -141,6 +174,101 @@ class AuroraArtworkRepository(
         return result
     }
 
+    internal suspend fun fetchBackgroundWithSession(
+        session: XboxFtpSession,
+        snapshot: LibrarySnapshot,
+        game: GameEntry,
+        route: FtpRoute,
+    ): ArtworkFetchResult {
+        coroutineContext.ensureActive()
+        val remotePath = AuroraArtworkPaths.backgroundAsset(snapshot.auroraRoot, game)
+        val remoteBytes = try {
+            session.size(remotePath)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Throwable) {
+            null
+        } ?: return ArtworkFetchResult(
+            status = ArtworkFetchStatus.Unavailable,
+            file = null,
+            remoteBytes = null,
+            route = route,
+            message = "Aurora não informou tamanho para o background de ${game.title}.",
+        )
+
+        if (remoteBytes <= 0L) {
+            return ArtworkFetchResult(
+                status = ArtworkFetchStatus.Unavailable,
+                file = null,
+                remoteBytes = remoteBytes,
+                route = route,
+                message = "Background não disponível no Aurora para ${game.title}.",
+            )
+        }
+
+        if (remoteBytes > MAX_SINGLE_BACKGROUND_BYTES) {
+            return ArtworkFetchResult(
+                status = ArtworkFetchStatus.Failed,
+                file = null,
+                remoteBytes = remoteBytes,
+                route = route,
+                message = "Background recusado por segurança: $remoteBytes bytes excedem o limite local.",
+            )
+        }
+
+        val rawFile = backgroundRawFile(game)
+        val pngFile = backgroundFile(game)
+        if (rawFile.isFile && rawFile.length() == remoteBytes && pngFile.isFile && pngFile.length() > 0L) {
+            return ArtworkFetchResult(
+                status = ArtworkFetchStatus.Cached,
+                file = pngFile,
+                remoteBytes = remoteBytes,
+                route = route,
+                message = "Background carregado do cache local.",
+            )
+        }
+
+        val temp = File(backgroundRawDir, "${AuroraArtworkPaths.cacheStem(game)}.tmp")
+        if (temp.exists()) temp.delete()
+
+        return try {
+            FileOutputStream(temp).use { output ->
+                session.download(remotePath, output)
+            }
+            coroutineContext.ensureActive()
+            require(temp.length() == remoteBytes) {
+                "Background incompleto: ${temp.length()} de $remoteBytes bytes."
+            }
+
+            val decoded = RxeaDecoder.decodeBackground(temp.readBytes())
+                ?: error("BK asset não contém slot BACKGROUND.")
+            persistPng(decoded, pngFile)
+
+            if (rawFile.exists()) rawFile.delete()
+            require(temp.renameTo(rawFile)) { "Não foi possível promover o cache RXEA do background." }
+
+            ArtworkFetchResult(
+                status = ArtworkFetchStatus.Downloaded,
+                file = pngFile,
+                remoteBytes = remoteBytes,
+                route = route,
+                message = "Background de ${game.title} salvo no cache local.",
+            )
+        } catch (cancelled: CancellationException) {
+            temp.delete()
+            throw cancelled
+        } catch (error: Throwable) {
+            temp.delete()
+            ArtworkFetchResult(
+                status = ArtworkFetchStatus.Failed,
+                file = null,
+                remoteBytes = remoteBytes,
+                route = route,
+                message = error.message ?: "Falha ao decodificar o background do Aurora.",
+            )
+        }
+    }
+
     private fun persistPng(decoded: DecodedRxeaImage, destination: File) {
         destination.parentFile?.mkdirs()
         val temp = File(destination.parentFile, "${destination.name}.tmp")
@@ -151,7 +279,7 @@ class AuroraArtworkRepository(
             bitmap.setPixels(decoded.argb, 0, decoded.width, 0, 0, decoded.width, decoded.height)
             FileOutputStream(temp).use { output ->
                 check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                    "Android não conseguiu codificar a capa em PNG."
+                    "Android não conseguiu codificar o artwork em PNG."
                 }
             }
         } finally {
@@ -159,7 +287,7 @@ class AuroraArtworkRepository(
         }
 
         if (destination.exists()) destination.delete()
-        require(temp.renameTo(destination)) { "Não foi possível promover a capa PNG para o cache." }
+        require(temp.renameTo(destination)) { "Não foi possível promover o artwork PNG para o cache." }
     }
 
     private fun rawFile(game: GameEntry): File =
@@ -167,6 +295,16 @@ class AuroraArtworkRepository(
 
     private fun coverFile(game: GameEntry): File =
         File(coverDir, "${AuroraArtworkPaths.cacheStem(game)}.png")
+
+    private fun backgroundRawFile(game: GameEntry): File =
+        File(backgroundRawDir, "${AuroraArtworkPaths.cacheStem(game)}.asset")
+
+    private fun backgroundFile(game: GameEntry): File =
+        File(backgroundDir, "${AuroraArtworkPaths.cacheStem(game)}.png")
+
+    companion object {
+        internal const val MAX_SINGLE_BACKGROUND_BYTES = 32L * 1024L * 1024L
+    }
 }
 
 data class ArtworkSyncProgress(
@@ -192,3 +330,22 @@ data class ArtworkSyncResult(
     val failed: Int,
     val route: FtpRoute,
 )
+
+enum class ArtworkFetchStatus {
+    Cached,
+    Downloaded,
+    Unavailable,
+    Failed,
+}
+
+data class ArtworkFetchResult(
+    val status: ArtworkFetchStatus,
+    val file: File?,
+    val remoteBytes: Long?,
+    val route: FtpRoute,
+    val message: String,
+) {
+    val available: Boolean
+        get() = (status == ArtworkFetchStatus.Cached || status == ArtworkFetchStatus.Downloaded) &&
+            file?.isFile == true && file.length() > 0L
+}

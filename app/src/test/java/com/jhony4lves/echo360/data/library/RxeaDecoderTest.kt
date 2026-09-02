@@ -30,6 +30,30 @@ class RxeaDecoderTest {
     }
 
     @Test
+    fun `decodes background slot independently from boxart`() {
+        val dxt5Blue = byteArrayOf(
+            0xFF.toByte(), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x1F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        )
+        val asset = nativeAsset(
+            slot = RxeaDecoder.SLOT_BACKGROUND,
+            format = 20,
+            width = 4,
+            height = 4,
+            endian = 1,
+            firstLinearBlock = dxt5Blue,
+        )
+
+        val background = requireNotNull(RxeaDecoder.decodeBackground(asset))
+
+        assertEquals(4, background.width)
+        assertEquals(4, background.height)
+        assertEquals(16, background.argb.size)
+        background.argb.forEach { pixel -> assertEquals(0xFF0000FF.toInt(), pixel) }
+        assertNull(RxeaDecoder.decodeBoxArt(asset))
+    }
+
+    @Test
     fun `decodes DXT1 opaque color and clips padded block area`() {
         val dxt1Green = byteArrayOf(
             0xE0.toByte(), 0x07, // RGB565 green
