@@ -23,6 +23,7 @@ permissions:
 env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
+  # PR #30 already proved and cached this exact pinned toolchain.
   ECHO_TOOLCHAIN_CACHE_KEY: echocore-openxechain-min-v2
 
 jobs:
