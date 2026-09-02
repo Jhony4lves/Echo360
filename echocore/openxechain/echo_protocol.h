@@ -101,14 +101,16 @@ static inline void echo_make_frame_header(
 
 /*
  * Bootstrap PING is deliberately strict. Reserved flags must remain zero and
- * the payload is exactly one opaque 64-bit nonce. This keeps the first Xbox
- * parser tiny and makes future protocol growth explicit instead of accidental.
+ * the payload is exactly one opaque 64-bit nonce. The legacy negative return
+ * values remain stable because the first host/bootstrap tests depend on them.
  */
 static inline int echo_validate_ping_header(const uint8_t header[ECHO_HEADER_BYTES]) {
     echo_frame_header parsed;
     int result = echo_parse_frame_header(header, &parsed);
-    if (result != ECHO_FRAME_OK) return result;
-    if (parsed.type != ECHO_TYPE_PING) return -5;
+    if (result == ECHO_FRAME_BAD_MAGIC) return -1;
+    if (result == ECHO_FRAME_BAD_VERSION) return -2;
+    if (result != ECHO_FRAME_OK) return -4;
+    if (parsed.type != ECHO_TYPE_PING) return -2;
     if (parsed.flags != 0U) return -3;
     if (parsed.payload_length != ECHO_PING_PAYLOAD_BYTES) return -4;
     return 0;
