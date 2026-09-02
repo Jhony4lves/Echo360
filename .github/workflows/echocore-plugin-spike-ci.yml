@@ -93,9 +93,9 @@ jobs:
           test -s "${OPENXECHAIN_SYSROOT}/lib/xecorelib.a"
           "${OPENXECHAIN_SYSROOT}/bin/clang" --version
 
-      - name: Run host protocol tests
+      - name: Run EchoCore host tests
         run: |
-          bash echocore/reference/run-tests.sh
+          bash echocore/tests/run-host-tests.sh
 
       - name: Build manual EchoCore title XEX
         run: |
