@@ -36,6 +36,9 @@ extern int KeDelayExecutionThread(
     int64_t *interval_ptr
 );
 
+/* See pairing XEX: SynthXEX v0.0.5 needs raw data in the final PE section. */
+static volatile uint32_t g_echo_synthxex_data_anchor = UINT32_C(0x4543484F);
+
 static uint32_t echo_plugin_worker(void *context) {
     unsigned i;
     (void)context;
@@ -60,10 +63,14 @@ static uint32_t echo_plugin_worker(void *context) {
  */
 int _start(void *module_handle, uint32_t reason, void *reserved) {
     uint32_t thread_handle = 0U;
+    uint32_t synthxex_anchor;
     int status;
 
     (void)module_handle;
     (void)reserved;
+
+    synthxex_anchor = g_echo_synthxex_data_anchor;
+    (void)synthxex_anchor;
 
     if (reason != ECHO_DLL_PROCESS_ATTACH) {
         return 1;
