@@ -207,24 +207,23 @@ internal object EchoCoreReadOnlyCandidateCodec {
         val normalized = canonicalPath.trim().replace('\\', '/')
         if (!normalized.startsWith('/')) fail("EchoCore path must be Android-canonical and start with /")
         if (normalized.contains("//")) fail("EchoCore path must not contain empty segments")
-        if (normalized.any { it.code < 0x20 }) fail("EchoCore path contains control characters")
+        if (normalized.any { it.code < 0x20 || it.code == 0x7f }) {
+            fail("EchoCore path contains a forbidden control byte")
+        }
 
         val segments = normalized.split('/').filter { it.isNotEmpty() }
         if (segments.isEmpty() || !segments.first().equals("Hdd1", ignoreCase = true)) {
             fail("EchoCore v1 only accepts canonical /Hdd1 paths")
+        }
+        if (segments.size < 2) {
+            fail("EchoCore v1 C path policy requires an explicit child below /Hdd1")
         }
         segments.forEachIndexed { index, segment ->
             if (segment == "." || segment == "..") fail("EchoCore path traversal is forbidden")
             if (segment.contains(':')) fail("EchoCore path segment contains ':' at index $index")
         }
 
-        val wire = buildString {
-            append("Hdd1:")
-            if (segments.size > 1) {
-                append('/')
-                append(segments.drop(1).joinToString("/"))
-            }
-        }
+        val wire = "Hdd1:/" + segments.drop(1).joinToString("/")
         val bytes = wire.toByteArray(Charsets.UTF_8)
         if (bytes.isEmpty() || bytes.size > MAX_PATH_BYTES || bytes.any { it == 0.toByte() }) {
             fail("EchoCore path payload length/content is invalid")
