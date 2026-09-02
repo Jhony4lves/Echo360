@@ -8,6 +8,8 @@
 int main(void) {
     uint8_t info[ECHO_CORE_INFO_BYTES];
     uint8_t stat[ECHO_FILE_STAT_BYTES];
+    char native[ECHO_NATIVE_PATH_MAX];
+    size_t native_len = 0U;
     const char good1[] = "Hdd1:/Content/0000000000000000/465307E4/00007000/default.xex";
     const char good2[] = "hDd1:\\Content\\0000000000000000\\465307E4\\00000002\\file";
     const char bad_parent[] = "Hdd1:/Content/../flash.xex";
@@ -53,6 +55,33 @@ int main(void) {
     assert(echo_path_is_safe_readonly(bad_double_separator, strlen(bad_double_separator)) == 0);
     assert(echo_path_is_safe_readonly(bad_ftp_alias, strlen(bad_ftp_alias)) == 0);
     assert(echo_path_is_safe_readonly(bad_colon, strlen(bad_colon)) == 0);
+
+    assert(echo_path_to_native_hdd1(
+        good1,
+        strlen(good1),
+        native,
+        sizeof(native),
+        &native_len
+    ) == 0);
+    assert(strcmp(
+        native,
+        "\\Device\\Harddisk0\\Partition1\\Content\\0000000000000000\\465307E4\\00007000\\default.xex"
+    ) == 0);
+    assert(native_len == strlen(native));
+    assert(echo_path_to_native_hdd1(
+        bad_parent,
+        strlen(bad_parent),
+        native,
+        sizeof(native),
+        NULL
+    ) == -1);
+    assert(echo_path_to_native_hdd1(
+        good1,
+        strlen(good1),
+        native,
+        8U,
+        NULL
+    ) == -2);
 
     assert(echo_ro_validate_path_payload(
         (const uint8_t *)good1,
