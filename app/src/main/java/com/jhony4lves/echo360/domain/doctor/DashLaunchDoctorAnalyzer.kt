@@ -85,7 +85,10 @@ class DashLaunchDoctorAnalyzer {
     }
 
     private fun crashDiagnosticFindings(snapshot: DashLaunchSnapshot): List<IntegrityFinding> = buildList {
-        val exchangeHandler = snapshot.optionValue("exchandler")?.toBooleanStrictOrNull()
+        val exchangeHandler = snapshot.optionValue("exchandler")
+            ?.trim()
+            ?.lowercase()
+            ?.toBooleanStrictOrNull()
         val dumpFile = snapshot.optionValue("dumpfile")?.trim().orEmpty()
 
         if (exchangeHandler == false && dumpFile.isNotBlank()) {
