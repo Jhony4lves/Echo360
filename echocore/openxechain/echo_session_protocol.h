@@ -16,7 +16,7 @@
 
 #define ECHO_SESSION_CHALLENGE_BYTES (8U + ECHO_AUTH_CHALLENGE_BYTES)
 #define ECHO_SESSION_AUTH_REQUEST_BYTES (8U + 8U + ECHO_AUTH_HMAC_SHA1_BYTES)
-#define ECHO_SESSION_AUTH_RESPONSE_BYTES 16U
+#define ECHO_SESSION_AUTH_RESPONSE_BYTES 24U
 
 #define ECHO_SESSION_STATUS_OK 0U
 #define ECHO_SESSION_STATUS_DENIED 1U
@@ -103,19 +103,24 @@ static inline int echo_session_parse_auth_request(
     return 0;
 }
 
-/* Response: status/reserved + granted caps + committed counter. */
+/*
+ * AUTH response payload:
+ *   0      status
+ *   1..7   reserved = 0
+ *   8..15  BE granted ECHO_AUTH_CAP_* bits
+ *   16..23 BE committed counter
+ */
 static inline void echo_session_make_auth_response(
     uint8_t out[ECHO_SESSION_AUTH_RESPONSE_BYTES],
     uint8_t status,
     uint64_t granted_capabilities,
     uint64_t committed_counter
 ) {
+    uint32_t i;
     out[0] = status;
-    out[1] = 0U;
-    out[2] = 0U;
-    out[3] = 0U;
-    echo_write_be32(out + 4U, (uint32_t)granted_capabilities);
-    echo_session_write_be64(out + 8U, committed_counter);
+    for (i = 1U; i < 8U; ++i) out[i] = 0U;
+    echo_session_write_be64(out + 8U, granted_capabilities);
+    echo_session_write_be64(out + 16U, committed_counter);
 }
 
 #endif
