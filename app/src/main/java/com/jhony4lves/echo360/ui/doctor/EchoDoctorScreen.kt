@@ -219,6 +219,10 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
             }
         }
 
+        item {
+            DoctorTelemetrySection()
+        }
+
         message?.let { text ->
             item {
                 EchoPanel(modifier = Modifier.fillMaxWidth()) {
