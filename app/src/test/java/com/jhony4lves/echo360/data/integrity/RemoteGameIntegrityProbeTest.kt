@@ -45,6 +45,21 @@ class RemoteGameIntegrityProbeTest {
     }
 
     @Test
+    fun `trimmed executable name is reused for SIZE path`() = runBlocking {
+        val session = FakeSession(
+            listBlock = { error("LIST unsupported") },
+            sizeBlock = { path ->
+                assertEquals("/Hdd1/Games/Test/default.xex", path)
+                4096L
+            },
+        )
+
+        val result = probe.verify(session, game(executable = "  default.xex  "))
+
+        assertTrue(result.verified)
+    }
+
+    @Test
     fun `directory where executable should be is an error`() = runBlocking {
         val session = FakeSession(
             listBlock = {
