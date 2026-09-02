@@ -23,7 +23,7 @@ permissions:
 env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
-  ECHO_TOOLCHAIN_CACHE_KEY: echocore-openxechain-fast-v3-j1
+  ECHO_TOOLCHAIN_CACHE_KEY: echocore-openxechain-min-v2
 
 jobs:
   core-host-tests:
@@ -71,7 +71,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cmake" --version
 
-      - name: Restore component-only OpenXeChain cache
+      - name: Restore proven OpenXeChain cache
         id: toolchain-cache
         uses: actions/cache@v4
         with:
@@ -131,7 +131,7 @@ jobs:
       - name: Checkout Echo360
         uses: actions/checkout@v5
 
-      - name: Restore proven component-only OpenXeChain toolchain
+      - name: Restore proven OpenXeChain toolchain
         uses: actions/cache/restore@v4
         with:
           path: /tmp/openxechain-sysroot
