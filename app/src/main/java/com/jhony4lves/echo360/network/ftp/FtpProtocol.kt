@@ -70,16 +70,7 @@ internal class FtpCommandChannel(
         require(username.isNotBlank()) { "Usuário FTP não configurado." }
         require(password.isNotBlank()) { "Senha FTP não configurada." }
 
-        val connected = Socket().apply {
-            soTimeout = timeoutMs
-            keepAlive = true
-            tcpNoDelay = true
-            try {
-                connect(InetSocketAddress(host, port), timeoutMs)
-            } catch (error: SocketTimeoutException) {
-                throw FtpStageTimeoutException("conexão TCP de controle", error)
-            }
-        }
+        val connected = connectControlSocket()
         socket = connected
         reader = connected.getInputStream().bufferedReader(Charsets.US_ASCII)
         writer = connected.getOutputStream().bufferedWriter(Charsets.US_ASCII)
@@ -115,6 +106,39 @@ internal class FtpCommandChannel(
         if (!typeReply.isPositive) {
             throw FtpProtocolException(typeReply.code, "Servidor FTP não aceitou modo binário.")
         }
+    }
+
+    private fun connectControlSocket(): Socket {
+        var lastError: IOException? = null
+
+        repeat(CONTROL_CONNECT_ATTEMPTS) { attempt ->
+            val candidate = Socket()
+            try {
+                candidate.soTimeout = timeoutMs
+                candidate.keepAlive = true
+                candidate.tcpNoDelay = true
+                candidate.connect(
+                    InetSocketAddress(host, port),
+                    minOf(timeoutMs, CONTROL_CONNECT_ATTEMPT_TIMEOUT_MS),
+                )
+                return candidate
+            } catch (error: IOException) {
+                lastError = error
+                runCatching { candidate.close() }
+                if (attempt < CONTROL_CONNECT_ATTEMPTS - 1) {
+                    Thread.sleep(CONTROL_CONNECT_RETRY_DELAY_MS * (attempt + 1))
+                }
+            }
+        }
+
+        val error = lastError ?: IOException("Falha desconhecida abrindo conexão FTP.")
+        if (error is SocketTimeoutException) {
+            throw FtpStageTimeoutException(
+                "conexão TCP de controle após $CONTROL_CONNECT_ATTEMPTS tentativas",
+                error,
+            )
+        }
+        throw error
     }
 
     fun command(command: String): FtpReply {
@@ -160,4 +184,10 @@ internal class FtpCommandChannel(
     }
 
     private fun requireSocket(): Socket = socket ?: throw IOException("Canal FTP não conectado.")
+
+    companion object {
+        private const val CONTROL_CONNECT_ATTEMPTS = 3
+        private const val CONTROL_CONNECT_ATTEMPT_TIMEOUT_MS = 2_500
+        private const val CONTROL_CONNECT_RETRY_DELAY_MS = 350L
+    }
 }
