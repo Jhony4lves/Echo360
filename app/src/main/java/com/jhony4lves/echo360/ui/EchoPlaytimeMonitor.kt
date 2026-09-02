@@ -44,6 +44,13 @@ internal fun EchoPlaytimeMonitor() {
             var refreshCatalogAt = 0L
 
             try {
+                // If Android killed the previous process before lifecycle teardown, an
+                // old active record may remain. Close it at its last saved observation
+                // before starting a fresh foreground observation window.
+                withContext(Dispatchers.IO) {
+                    playSessionStore.stopObserving()
+                }
+
                 while (coroutineContext.isActive) {
                     val cycleStartedAt = System.currentTimeMillis()
                     if (games.isEmpty() || cycleStartedAt >= refreshCatalogAt) {
