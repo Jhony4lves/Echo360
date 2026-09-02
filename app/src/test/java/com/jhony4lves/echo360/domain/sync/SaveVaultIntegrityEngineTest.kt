@@ -3,6 +3,7 @@ package com.jhony4lves.echo360.domain.sync
 import com.jhony4lves.echo360.network.ftp.FtpRoute
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,9 +39,7 @@ class SaveVaultIntegrityEngineTest {
     fun `missing size and hash mismatches are explicit errors`() {
         val report = SaveVaultIntegrityEngine.verify(
             manifest,
-            listOf(
-                evidence("a.bin", 2L, "c"),
-            ),
+            listOf(evidence("a.bin", 2L, "c")),
         )
 
         assertFalse(report.valid)
@@ -51,14 +50,14 @@ class SaveVaultIntegrityEngineTest {
     }
 
     @Test
-    fun `extra local payload is warning but does not invalidate declared files`() {
+    fun `extra local payload is warning and does not need a hash`() {
         val report = SaveVaultIntegrityEngine.verify(
-            manifest,
-            listOf(
+            manifest = manifest,
+            localFiles = listOf(
                 evidence("a.bin", 3L, "a"),
                 evidence("sub/b.bin", 4L, "b"),
-                evidence("extra.bin", 1L, "e"),
             ),
+            extraRelativePaths = listOf("extra.bin"),
         )
 
         assertTrue(report.valid)
@@ -79,6 +78,20 @@ class SaveVaultIntegrityEngineTest {
 
         assertTrue(report.valid)
         assertTrue(report.complete)
+    }
+
+    @Test
+    fun `declared path cannot also be supplied as extra`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            SaveVaultIntegrityEngine.verify(
+                manifest = manifest,
+                localFiles = listOf(
+                    evidence("a.bin", 3L, "a"),
+                    evidence("sub/b.bin", 4L, "b"),
+                ),
+                extraRelativePaths = listOf("A.BIN"),
+            )
+        }
     }
 
     private fun evidence(path: String, size: Long, hex: String) = SaveVaultLocalFileEvidence(
