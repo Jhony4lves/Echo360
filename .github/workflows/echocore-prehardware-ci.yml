@@ -1,0 +1,233 @@
+name: EchoCore Pre-hardware CI
+
+on:
+  push:
+    branches:
+      - echocore/prehardware-integration
+    paths:
+      - 'echocore/**'
+      - '.github/workflows/echocore-prehardware-ci.yml'
+  pull_request:
+    paths:
+      - 'echocore/**'
+      - '.github/workflows/echocore-prehardware-ci.yml'
+
+concurrency:
+  group: echocore-prehardware-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  console-contracts:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Validate shell build scripts
+        run: |
+          set -euxo pipefail
+          bash -n echocore/openxechain/build-minimal-toolchain-fast.sh
+          bash -n echocore/openxechain/build-minimal-toolchain.sh
+          bash -n echocore/openxechain/build-echo-core.sh
+          bash -n echocore/openxechain/build-echo-core-plugin-smoke.sh
+          bash -n echocore/tests/run-host-tests.sh
+
+      - name: Run EchoCore protocol auth path and transfer-state tests
+        run: bash echocore/tests/run-host-tests.sh
+
+      - name: Compile pure read-only contract tests
+        run: |
+          set -euxo pipefail
+          CFLAGS='-std=c11 -Wall -Wextra -Werror -pedantic'
+          clang ${CFLAGS} echocore/contract/echo_readonly_contract_test.c -o /tmp/echo-readonly-contract-test
+          clang ${CFLAGS} echocore/contract/echo_doctor_telemetry_test.c -o /tmp/echo-doctor-telemetry-test
+          clang ${CFLAGS} \
+            echocore/contract/echo_runtime_info_test.c \
+            echocore/contract/echo_runtime_info_xbox.c \
+            -o /tmp/echo-runtime-info-test
+
+      - name: Run pure read-only contract tests
+        run: |
+          set -euxo pipefail
+          /tmp/echo-readonly-contract-test
+          /tmp/echo-doctor-telemetry-test
+          /tmp/echo-runtime-info-test
+
+      - name: Syntax-check freestanding bootstrap and plugin smoke
+        run: |
+          set -euxo pipefail
+          CFLAGS='-std=c11 -Wall -Wextra -Werror -pedantic -ffreestanding -fno-builtin'
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core_plugin_smoke.c
+
+      - name: Create audited Xbox read-only ABI stubs
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/echocore-ro-stubs/xecore
+          cat > /tmp/echocore-ro-stubs/xecore/xboxkrnl_types.h <<'EOF'
+          #ifndef ECHO_PREHW_TYPES_H
+          #define ECHO_PREHW_TYPES_H
+          #include <stdbool.h>
+          #include <stdint.h>
+          typedef int32_t NTSTATUS;
+          typedef void *HANDLE;
+          typedef void *HMODULE;
+          typedef struct _ANSI_STRING { uint16_t Length; uint16_t MaximumLength; char *Buffer; } ANSI_STRING;
+          typedef struct _OBJECT_ATTRIBUTES { HANDLE root_directory; ANSI_STRING *name_ptr; uint32_t attributes; } OBJECT_ATTRIBUTES;
+          typedef struct _IO_STATUS_BLOCK { union { NTSTATUS Status; void *Pointer; }; uint32_t Information; } IO_STATUS_BLOCK;
+          typedef struct _FILE_NETWORK_OPEN_INFORMATION {
+            int64_t CreationTime; int64_t LastAccessTime; int64_t LastWriteTime; int64_t ChangeTime;
+            int64_t AllocationSize; int64_t EndOfFile; uint32_t FileAttributes; uint32_t pad;
+          } FILE_NETWORK_OPEN_INFORMATION;
+          typedef struct _MM_TITLE_STATISTICS { uint32_t available_pages; } MM_TITLE_STATISTICS;
+          typedef struct _MM_QUERY_STATISTICS_RESULT {
+            uint32_t size;
+            uint32_t total_physical_pages;
+            MM_TITLE_STATISTICS title;
+          } MM_QUERY_STATISTICS_RESULT;
+          #define STATUS_SUCCESS ((NTSTATUS)0x00000000)
+          #define STATUS_NO_MORE_FILES ((NTSTATUS)0x80000006u)
+          #define STATUS_NO_SUCH_FILE ((NTSTATUS)0xC000000Fu)
+          #define STATUS_OBJECT_NAME_NOT_FOUND ((NTSTATUS)0xC0000034u)
+          #define STATUS_NOT_FOUND ((NTSTATUS)0xC0000225u)
+          #define STATUS_ACCESS_DENIED ((NTSTATUS)0xC0000022u)
+          #define STATUS_OBJECT_NAME_INVALID ((NTSTATUS)0xC0000033u)
+          #define STATUS_INVALID_PARAMETER ((NTSTATUS)0xC000000Du)
+          #define STATUS_NOT_SUPPORTED ((NTSTATUS)0xC00000BBu)
+          #define STATUS_NOT_IMPLEMENTED ((NTSTATUS)0xC0000002u)
+          #define FILE_LIST_DIRECTORY 0x0001u
+          #define SYNCHRONIZE 0x00100000u
+          #define FILE_SHARE_READ 0x00000001u
+          #define FILE_SHARE_WRITE 0x00000002u
+          #define FILE_SHARE_DELETE 0x00000004u
+          #define FILE_DIRECTORY_FILE 0x00000001u
+          #define FILE_SYNCHRONOUS_IO_NONALERT 0x00000020u
+          #define FILE_ATTRIBUTE_DIRECTORY 0x00000010u
+          #define OBJ_CASE_INSENSITIVE 0x00000040u
+          #define FAILED(status) ((NTSTATUS)(status) < 0)
+          #endif
+          EOF
+          cat > /tmp/echocore-ro-stubs/xecore/xboxkrnl_rtl.h <<'EOF'
+          #ifndef ECHO_PREHW_RTL_H
+          #define ECHO_PREHW_RTL_H
+          #include "xboxkrnl_types.h"
+          void RtlInitAnsiString(ANSI_STRING *dest, const char *source);
+          #endif
+          EOF
+          cat > /tmp/echocore-ro-stubs/xecore/xboxkrnl_modules.h <<'EOF'
+          #ifndef ECHO_PREHW_MODULES_H
+          #define ECHO_PREHW_MODULES_H
+          #include "xboxkrnl_types.h"
+          NTSTATUS XexGetModuleHandle(const char *name, HMODULE *out_hmodule);
+          NTSTATUS XexGetProcedureAddress(HMODULE hmodule, uint32_t ordinal, void **out_function_ptr);
+          #endif
+          EOF
+          cat > /tmp/echocore-ro-stubs/xecore/xboxkrnl_mem.h <<'EOF'
+          #ifndef ECHO_PREHW_MEM_H
+          #define ECHO_PREHW_MEM_H
+          #include "xboxkrnl_types.h"
+          bool MmIsAddressValid(void *address);
+          NTSTATUS MmQueryStatistics(MM_QUERY_STATISTICS_RESULT *stats);
+          #endif
+          EOF
+          cat > /tmp/echocore-ro-stubs/xecore/xboxkrnl_hal.h <<'EOF'
+          #ifndef ECHO_PREHW_HAL_H
+          #define ECHO_PREHW_HAL_H
+          #include <stdint.h>
+          void HalSendSMCMessage(uint8_t *message, uint8_t *response);
+          #endif
+          EOF
+          cat > /tmp/echocore-ro-stubs/xecore/xboxkrnl_io.h <<'EOF'
+          #ifndef ECHO_PREHW_IO_H
+          #define ECHO_PREHW_IO_H
+          #include "xboxkrnl_types.h"
+          NTSTATUS NtQueryFullAttributesFile(OBJECT_ATTRIBUTES *attributes, FILE_NETWORK_OPEN_INFORMATION *info);
+          NTSTATUS NtClose(HANDLE handle);
+          #endif
+          EOF
+
+      - name: Syntax-check all read-only Xbox adapters
+        run: |
+          set -euxo pipefail
+          CFLAGS='-std=c11 -Wall -Wextra -Werror -pedantic -I/tmp/echocore-ro-stubs'
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_file_stat_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_dir_list_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_dashlaunch_snapshot_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_doctor_telemetry_xbox.c
+
+      - name: Create audited Xbox writer ABI stubs
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/echocore-writer-stubs/xecore
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_types.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_TYPES_H
+          #define ECHO_WRITER_TEST_TYPES_H
+          #include <stdint.h>
+          typedef int32_t NTSTATUS;
+          typedef void *HANDLE;
+          typedef struct _ANSI_STRING { uint16_t Length; uint16_t MaximumLength; char *Buffer; } ANSI_STRING;
+          typedef struct _OBJECT_ATTRIBUTES { HANDLE root_directory; ANSI_STRING *name_ptr; uint32_t attributes; } OBJECT_ATTRIBUTES;
+          typedef struct _IO_STATUS_BLOCK { union { NTSTATUS Status; void *Pointer; }; uint32_t Information; } IO_STATUS_BLOCK;
+          typedef void IO_APC_ROUTINE(void *context, IO_STATUS_BLOCK *status, uint32_t reserved);
+          typedef struct _FILE_NETWORK_OPEN_INFORMATION {
+            int64_t CreationTime; int64_t LastAccessTime; int64_t LastWriteTime; int64_t ChangeTime;
+            int64_t AllocationSize; int64_t EndOfFile; uint32_t FileAttributes; uint32_t pad;
+          } FILE_NETWORK_OPEN_INFORMATION;
+          typedef struct _CRYPT_SHA256_STATE { uint32_t words[40]; } CRYPT_SHA256_STATE;
+          #define STATUS_OBJECT_NAME_COLLISION ((NTSTATUS)0xC0000035u)
+          #define FILE_READ_DATA 0x0001u
+          #define FILE_WRITE_DATA 0x0002u
+          #define FILE_READ_ATTRIBUTES 0x0080u
+          #define DELETE 0x00010000u
+          #define SYNCHRONIZE 0x00100000u
+          #define FILE_ATTRIBUTE_NORMAL 0x00000080u
+          #define FILE_SHARE_READ 0x00000001u
+          #define FILE_OVERWRITE_IF 5u
+          #define FILE_OPEN 1u
+          #define FILE_NON_DIRECTORY_FILE 0x00000040u
+          #define FILE_SYNCHRONOUS_IO_NONALERT 0x00000020u
+          #define FileNetworkOpenInformation 34u
+          #define FileRenameInformation 10u
+          #define OBJ_CASE_INSENSITIVE 0x00000040u
+          #endif
+          EOF
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_io.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_IO_H
+          #define ECHO_WRITER_TEST_IO_H
+          #include "xboxkrnl_types.h"
+          NTSTATUS NtCreateFile(HANDLE *, uint32_t, OBJECT_ATTRIBUTES *, IO_STATUS_BLOCK *, uint32_t *, uint32_t, uint32_t, uint32_t, uint32_t);
+          NTSTATUS NtQueryInformationFile(HANDLE, IO_STATUS_BLOCK *, void *, uint32_t, uint32_t);
+          NTSTATUS NtReadFile(HANDLE, HANDLE, IO_APC_ROUTINE *, void *, IO_STATUS_BLOCK *, void *, uint32_t, int64_t *);
+          NTSTATUS NtWriteFile(HANDLE, HANDLE, IO_APC_ROUTINE *, void *, IO_STATUS_BLOCK *, void *, uint32_t, int64_t *);
+          NTSTATUS NtFlushBuffersFile(HANDLE, IO_STATUS_BLOCK *);
+          NTSTATUS NtSetInformationFile(HANDLE, IO_STATUS_BLOCK *, void *, uint32_t, uint32_t);
+          NTSTATUS NtClose(HANDLE);
+          #endif
+          EOF
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_rtl.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_RTL_H
+          #define ECHO_WRITER_TEST_RTL_H
+          #include "xboxkrnl_types.h"
+          void RtlInitAnsiString(ANSI_STRING *, const char *);
+          #endif
+          EOF
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_crypto.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_CRYPTO_H
+          #define ECHO_WRITER_TEST_CRYPTO_H
+          #include "xboxkrnl_types.h"
+          void XeCryptSha256Init(CRYPT_SHA256_STATE *);
+          void XeCryptSha256Update(CRYPT_SHA256_STATE *, const uint8_t *, uint32_t);
+          void XeCryptSha256Final(CRYPT_SHA256_STATE *, uint8_t *, uint32_t);
+          #endif
+          EOF
+
+      - name: Syntax-check transactional writer
+        run: |
+          set -euxo pipefail
+          clang -std=c11 -Wall -Wextra -Werror -pedantic \
+            -I/tmp/echocore-writer-stubs \
+            -fsyntax-only echocore/openxechain/echo_transfer_writer_xbox.c
