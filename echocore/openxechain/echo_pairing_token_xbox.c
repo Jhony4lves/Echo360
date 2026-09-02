@@ -14,6 +14,14 @@ static void echo_pairing_token_zero(void *memory, uint32_t length) {
     for (i = 0U; i < length; ++i) bytes[i] = 0U;
 }
 
+static int echo_pairing_bytes_all_zero(const uint8_t *bytes, uint32_t length) {
+    uint8_t any = 0U;
+    uint32_t i;
+    if (bytes == NULL || length == 0U) return 1;
+    for (i = 0U; i < length; ++i) any = (uint8_t)(any | bytes[i]);
+    return any == 0U ? 1 : 0;
+}
+
 int echo_pairing_token_xbox_generate(
     uint8_t token[ECHO_PAIRING_TOKEN_BYTES]
 ) {
@@ -52,5 +60,5 @@ int echo_pairing_token_xbox_derive_secret(
         ECHO_AUTH_SECRET_BYTES
     );
 
-    return echo_pairing_token_is_zero(secret) ? -2 : 0;
+    return echo_pairing_bytes_all_zero(secret, ECHO_AUTH_SECRET_BYTES) ? -2 : 0;
 }
