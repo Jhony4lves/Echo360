@@ -27,29 +27,66 @@ class NowPlayingMatcherTest {
 
     @Test
     fun `exact media id wins when title has multiple entries`() {
-        val matched = matchObservedGame(games, nowPlaying(first.titleId, second.mediaId))
+        val matched = matchObservedGame(
+            games,
+            CurrentTitleObservation(
+                titleId = first.titleId,
+                mediaId = second.mediaId,
+                origin = CurrentTitleOrigin.NovaCompatibility,
+            ),
+        )
 
         assertEquals(second.stableKey, matched?.stableKey)
     }
 
     @Test
-    fun `zero media id falls back to title id`() {
-        val matched = matchObservedGame(games, nowPlaying(first.titleId, 0L))
+    fun `title-only EchoCore style observation falls back to title id`() {
+        val matched = matchObservedGame(
+            games,
+            CurrentTitleObservation(
+                titleId = first.titleId,
+                mediaId = null,
+                origin = CurrentTitleOrigin.EchoCore,
+            ),
+        )
 
         assertEquals(first.stableKey, matched?.stableKey)
     }
 
     @Test
     fun `unknown media id still falls back to known title id`() {
-        val matched = matchObservedGame(games, nowPlaying(first.titleId, 0x77777777))
+        val matched = matchObservedGame(
+            games,
+            CurrentTitleObservation(
+                titleId = first.titleId,
+                mediaId = 0x77777777,
+                origin = CurrentTitleOrigin.NovaCompatibility,
+            ),
+        )
 
         assertEquals(first.stableKey, matched?.stableKey)
     }
 
     @Test
-    fun `unknown or zero title is not matched`() {
-        assertNull(matchObservedGame(games, nowPlaying(0L, 0L)))
-        assertNull(matchObservedGame(games, nowPlaying(0x12345678, 0L)))
+    fun `zero or unknown title is not matched`() {
+        assertNull(
+            matchObservedGame(
+                games,
+                CurrentTitleObservation(0L, CurrentTitleOrigin.EchoCore),
+            ),
+        )
+        assertNull(
+            matchObservedGame(
+                games,
+                CurrentTitleObservation(0x12345678, CurrentTitleOrigin.EchoCore),
+            ),
+        )
+    }
+
+    @Test
+    fun `legacy rich NowPlaying overload preserves matching behavior`() {
+        val matched = matchObservedGame(games, nowPlaying(first.titleId, second.mediaId))
+        assertEquals(second.stableKey, matched?.stableKey)
     }
 
     private fun game(
