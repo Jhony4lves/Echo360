@@ -1,5 +1,7 @@
 package com.jhony4lves.echo360.domain.tu
 
+import com.jhony4lves.echo360.network.ftp.FtpRoute
+
 enum class TitleUpdateLocation {
     ContentFolder,
     LegacyCache,
@@ -44,7 +46,7 @@ data class RuntimeTitleUpdateObservation(
 
 data class TitleUpdateInventory(
     val requestedTitleIdHex: String,
-    val actualRoute: String,
+    val actualRoute: FtpRoute,
     val contentFolder: TitleUpdateSourceResult,
     val legacyCache: TitleUpdateSourceResult,
     val runtime: RuntimeTitleUpdateObservation? = null,
@@ -53,6 +55,7 @@ data class TitleUpdateInventory(
 ) {
     init {
         require(requestedTitleIdHex.matches(Regex("^[0-9A-F]{8}$"))) { "Requested Title ID inválido." }
+        require(actualRoute != FtpRoute.Auto) { "EchoTU precisa registrar a rota FTP já resolvida." }
     }
 
     val titleScopedCandidates: List<TitleUpdateCandidate>
