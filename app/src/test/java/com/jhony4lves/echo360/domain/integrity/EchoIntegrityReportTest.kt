@@ -1,6 +1,5 @@
 package com.jhony4lves.echo360.domain.integrity
 
-import com.jhony4lves.echo360.network.ftp.FtpRoute
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -47,7 +46,7 @@ class EchoIntegrityReportTest {
         val merged = initial.mergeRemote(
             remoteFindings = listOf(newRemote),
             verified = true,
-            route = FtpRoute.Fast,
+            route = IntegrityRemoteRoute.Fast,
             message = "ok",
             checkedAtEpochMs = 2L,
         )
@@ -55,7 +54,7 @@ class EchoIntegrityReportTest {
         assertEquals(setOf("snapshot", "new"), merged.findings.map { it.code }.toSet())
         assertTrue(merged.remoteAttempted)
         assertTrue(merged.remoteVerified)
-        assertEquals(FtpRoute.Fast, merged.route)
+        assertEquals(IntegrityRemoteRoute.Fast, merged.route)
         assertEquals("ok", merged.remoteMessage)
         assertEquals(2L, merged.checkedAtEpochMs)
     }
