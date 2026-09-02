@@ -39,7 +39,12 @@ typedef struct echo_auth_state {
     uint8_t authenticated;
 } echo_auth_state;
 
-static void echo_auth_zero_bytes(uint8_t *bytes, size_t length) {
+/*
+ * Keep these byte operations explicit for the freestanding Xbox build. The
+ * volatile accesses prevent an optimizer from replacing the tiny loops with an
+ * implicit memset/memcpy dependency that would defeat -nostdlib linkage.
+ */
+static void echo_auth_zero_bytes(volatile uint8_t *bytes, size_t length) {
     size_t i;
     if (bytes == NULL) {
         return;
@@ -49,7 +54,11 @@ static void echo_auth_zero_bytes(uint8_t *bytes, size_t length) {
     }
 }
 
-static void echo_auth_copy_bytes(uint8_t *dest, const uint8_t *src, size_t length) {
+static void echo_auth_copy_bytes(
+    volatile uint8_t *dest,
+    const volatile uint8_t *src,
+    size_t length
+) {
     size_t i;
     if (dest == NULL || src == NULL) {
         return;
@@ -77,13 +86,32 @@ static int echo_auth_session_begin(
     uint64_t session_id,
     const uint8_t challenge[ECHO_AUTH_CHALLENGE_BYTES]
 ) {
+    uint8_t challenge_snapshot[ECHO_AUTH_CHALLENGE_BYTES];
+
     if (state == NULL || challenge == NULL || session_id == UINT64_C(0)) {
         return -1;
     }
 
+    /*
+     * Snapshot first because callers are allowed to generate a fresh challenge
+     * directly into state->challenge. session_end() intentionally scrubs that
+     * storage, so copying only afterwards would turn an aliased challenge into
+     * sixteen zero bytes.
+     */
+    echo_auth_copy_bytes(
+        challenge_snapshot,
+        challenge,
+        ECHO_AUTH_CHALLENGE_BYTES
+    );
+
     echo_auth_session_end(state);
     state->session_id = session_id;
-    echo_auth_copy_bytes(state->challenge, challenge, ECHO_AUTH_CHALLENGE_BYTES);
+    echo_auth_copy_bytes(
+        state->challenge,
+        challenge_snapshot,
+        ECHO_AUTH_CHALLENGE_BYTES
+    );
+    echo_auth_zero_bytes(challenge_snapshot, ECHO_AUTH_CHALLENGE_BYTES);
     state->challenge_active = 1U;
     return 0;
 }
