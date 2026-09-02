@@ -87,6 +87,7 @@ class SecureXboxConfigStore(context: Context) {
 
     private fun toJson(profile: XboxProfile): JSONObject = JSONObject().apply {
         put("host", profile.endpoint.host)
+        put("echoLinkPort", profile.endpoint.echoLinkPort)
         put("novaPort", profile.endpoint.novaPort)
         put("auroraFtpPort", profile.endpoint.auroraFtpPort)
         put("ftpDllPort", profile.endpoint.ftpDllPort)
@@ -105,6 +106,7 @@ class SecureXboxConfigStore(context: Context) {
         return XboxProfile(
             endpoint = XboxEndpoint(
                 host = json.optString("host", ""),
+                echoLinkPort = json.optInt("echoLinkPort", 36_000),
                 novaPort = json.optInt("novaPort", 9999),
                 auroraFtpPort = json.optInt("auroraFtpPort", 21),
                 ftpDllPort = json.optInt("ftpDllPort", 7564),
