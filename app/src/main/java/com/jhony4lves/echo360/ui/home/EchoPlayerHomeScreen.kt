@@ -12,13 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FolderCopy
 import androidx.compose.material.icons.outlined.SettingsEthernet
 import androidx.compose.material.icons.outlined.SportsEsports
@@ -44,14 +41,14 @@ import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.data.library.AuroraLibraryRepository
 import com.jhony4lves.echo360.data.library.PlayerStateStore
 import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
-import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.domain.library.LibrarySnapshot
 import com.jhony4lves.echo360.domain.library.NowPlaying
 import com.jhony4lves.echo360.domain.library.PlayerGameState
-import com.jhony4lves.echo360.domain.library.recentGames
+import com.jhony4lves.echo360.domain.library.buildHomeCollectionModel
 import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.components.EchoPanel
 import com.jhony4lves.echo360.ui.components.EchoStatusPill
+import com.jhony4lves.echo360.ui.library.CachedGameArt
 import com.jhony4lves.echo360.ui.theme.EchoColors
 import kotlinx.coroutines.launch
 
@@ -98,17 +95,24 @@ fun EchoPlayerHomeScreen(
         games.firstOrNull { it.titleId == live.titleId && (live.mediaId == 0L || it.mediaId == live.mediaId) }
             ?: games.firstOrNull { it.titleId == live.titleId }
     }
-    val recent = recentGames(games, states, limit = 4)
-    val continueGame = liveGame ?: recent.firstOrNull()
-    val favoriteCount = states.values.count { it.favorite }
+    val collection = buildHomeCollectionModel(
+        games = games,
+        states = states,
+        liveGame = liveGame,
+    )
+    val continueGame = collection.continueGame
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 30.dp),
+        contentPadding = PaddingValues(top = 22.dp, bottom = 30.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -131,7 +135,12 @@ fun EchoPlayerHomeScreen(
         }
 
         item {
-            EchoPanel(modifier = Modifier.fillMaxWidth(), highlighted = configured) {
+            EchoPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+                highlighted = configured,
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -168,7 +177,11 @@ fun EchoPlayerHomeScreen(
                             color = EchoColors.Text,
                         )
                         Text(
-                            if (configured) "NOVA, Aurora FTP e FTPdll disponíveis pela camada nativa." else "IP, NOVA e FTP ficam protegidos pelo Android Keystore.",
+                            if (configured) {
+                                "NOVA, Aurora FTP e FTPdll disponíveis pela camada nativa."
+                            } else {
+                                "IP, NOVA e FTP ficam protegidos pelo Android Keystore."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = EchoColors.TextSecondary,
                         )
@@ -190,7 +203,12 @@ fun EchoPlayerHomeScreen(
         }
 
         item {
-            EchoPanel(modifier = Modifier.fillMaxWidth(), highlighted = continueGame != null) {
+            EchoPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+                highlighted = continueGame != null,
+            ) {
                 Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -203,7 +221,11 @@ fun EchoPlayerHomeScreen(
 
                     if (continueGame == null) {
                         Text(
-                            if (snapshot == null) "Sua biblioteca ainda não foi sincronizada." else "Jogue ou marque títulos para começar seu histórico.",
+                            if (snapshot == null) {
+                                "Sua biblioteca ainda não foi sincronizada."
+                            } else {
+                                "Jogue ou marque títulos para começar seu histórico."
+                            },
                             style = MaterialTheme.typography.titleLarge,
                             color = EchoColors.Text,
                         )
@@ -214,7 +236,7 @@ fun EchoPlayerHomeScreen(
                         )
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            HomeGameArt(continueGame, 72)
+                            CachedGameArt(game = continueGame, size = 72, revision = 0)
                             Spacer(Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -230,7 +252,11 @@ fun EchoPlayerHomeScreen(
                                         "TU ${nowPlaying?.titleUpdateVersion ?: 0} // ${nowPlaying?.resolutionWidth ?: 0}×${nowPlaying?.resolutionHeight ?: 0}"
                                     } else {
                                         val state = states[continueGame.stableKey] ?: PlayerGameState()
-                                        if (state.launchCount > 0) "INICIADO ${state.launchCount}x PELO ECHO" else "ÚLTIMA ATIVIDADE SALVA"
+                                        if (state.launchCount > 0) {
+                                            "INICIADO ${state.launchCount}x PELO ECHO"
+                                        } else {
+                                            "ÚLTIMA ATIVIDADE SALVA"
+                                        }
                                     },
                                     style = MaterialTheme.typography.labelMedium,
                                     color = EchoColors.NeonGreen,
@@ -250,59 +276,50 @@ fun EchoPlayerHomeScreen(
                     ) {
                         Icon(Icons.Outlined.SportsEsports, null)
                         Spacer(Modifier.width(7.dp))
-                        Text(if (continueGame == null) "ABRIR BIBLIOTECA" else "VER NA BIBLIOTECA", fontWeight = FontWeight.Black)
-                    }
-                }
-            }
-        }
-
-        if (recent.isNotEmpty()) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    EchoEyebrow("RECENTES")
-                    Text("${recent.size} ATIVOS", style = MaterialTheme.typography.labelMedium, color = EchoColors.TextMuted)
-                }
-            }
-            items(recent, key = { it.stableKey }) { game ->
-                EchoPanel(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(onClick = onOpenLibrary)
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        HomeGameArt(game, 48)
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(game.title, style = MaterialTheme.typography.titleMedium, color = EchoColors.Text)
-                            Text(
-                                states[game.stableKey]?.status?.label?.uppercase() ?: game.titleIdHex,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = EchoColors.TextMuted,
-                            )
-                        }
-                        if (states[game.stableKey]?.favorite == true) {
-                            Icon(Icons.Outlined.Favorite, null, tint = EchoColors.NeonGreen)
-                        }
+                        Text(
+                            if (continueGame == null) "ABRIR BIBLIOTECA" else "VER NA BIBLIOTECA",
+                            fontWeight = FontWeight.Black,
+                        )
                     }
                 }
             }
         }
 
         item {
+            HomeCollectionRail(
+                eyebrow = "RECENTES",
+                games = collection.recentGames,
+                states = states,
+                artworkRevision = 0,
+                onOpenLibrary = onOpenLibrary,
+            )
+        }
+
+        item {
+            HomeCollectionRail(
+                eyebrow = "FAVORITOS",
+                games = collection.favoriteGames,
+                states = states,
+                artworkRevision = 0,
+                onOpenLibrary = onOpenLibrary,
+            )
+        }
+
+        item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 QuickTile(
                     code = "LB",
                     title = "Biblioteca",
-                    subtitle = if (snapshot == null) "Sincronizar jogos" else "${games.size} jogos • $favoriteCount favoritos",
+                    subtitle = if (snapshot == null) {
+                        "Sincronizar jogos"
+                    } else {
+                        "${collection.totalGames} jogos • ${collection.favoriteCount} favoritos"
+                    },
                     modifier = Modifier.weight(1f),
                     onClick = onOpenLibrary,
                 )
@@ -317,7 +334,11 @@ fun EchoPlayerHomeScreen(
         }
 
         item {
-            EchoPanel(modifier = Modifier.fillMaxWidth()) {
+            EchoPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+            ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     EchoEyebrow("BUILD CHANNEL")
                     Text("Player Experience", style = MaterialTheme.typography.titleLarge, color = EchoColors.Text)
@@ -358,10 +379,20 @@ private fun QuickTile(
                 .clickable(onClick = onClick)
                 .padding(14.dp),
         ) {
-            Text(code, style = MaterialTheme.typography.labelLarge, color = EchoColors.NeonGreen, fontWeight = FontWeight.Black)
+            Text(
+                code,
+                style = MaterialTheme.typography.labelLarge,
+                color = EchoColors.NeonGreen,
+                fontWeight = FontWeight.Black,
+            )
             Spacer(Modifier.height(17.dp))
             Text(title, style = MaterialTheme.typography.titleMedium, color = EchoColors.Text)
-            Text(subtitle, style = MaterialTheme.typography.labelMedium, color = EchoColors.TextMuted, maxLines = 2)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = EchoColors.TextMuted,
+                maxLines = 2,
+            )
             Spacer(Modifier.height(10.dp))
             Icon(
                 if (code == "TX") Icons.Outlined.FolderCopy else Icons.Outlined.SportsEsports,
@@ -369,28 +400,5 @@ private fun QuickTile(
                 tint = EchoColors.NeonGreen,
             )
         }
-    }
-}
-
-@Composable
-private fun HomeGameArt(game: GameEntry, size: Int) {
-    val initials = game.title
-        .split(' ')
-        .filter { it.isNotBlank() }
-        .take(2)
-        .joinToString("") { it.first().uppercase() }
-        .ifBlank { "X" }
-    Box(
-        modifier = Modifier
-            .size(size.dp)
-            .background(
-                Brush.radialGradient(
-                    listOf(EchoColors.NeonGreen.copy(alpha = 0.30f), EchoColors.SurfaceHigh, EchoColors.Void),
-                ),
-                RoundedCornerShape(15.dp),
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(initials, style = MaterialTheme.typography.headlineSmall, color = EchoColors.NeonGreen, fontWeight = FontWeight.Black)
     }
 }
