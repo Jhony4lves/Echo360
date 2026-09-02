@@ -50,6 +50,12 @@ internal class FtpStageTimeoutException(
     cause: SocketTimeoutException,
 ) : IOException("Timeout em $stage.", cause)
 
+internal class FtpControlConnectException(
+    val host: String,
+    val port: Int,
+    cause: IOException,
+) : IOException("Falha ao conectar ao FTP de controle em $host:$port (${cause.message ?: cause::class.java.simpleName}).", cause)
+
 internal class FtpCommandChannel(
     private val host: String,
     private val port: Int,
@@ -70,14 +76,27 @@ internal class FtpCommandChannel(
         require(username.isNotBlank()) { "Usuário FTP não configurado." }
         require(password.isNotBlank()) { "Senha FTP não configurada." }
 
+        // Resolve the configured endpoint before entering Socket.apply. Inside
+        // apply, an unqualified `port` resolves to Socket.port (0 before the
+        // connection), not FtpCommandChannel.port.
+        val controlEndpoint = InetSocketAddress(host, port)
         val connected = Socket().apply {
             soTimeout = timeoutMs
             keepAlive = true
             tcpNoDelay = true
             try {
-                connect(InetSocketAddress(host, port), timeoutMs)
+                connect(controlEndpoint, timeoutMs)
             } catch (error: SocketTimeoutException) {
-                throw FtpStageTimeoutException("conexão TCP de controle", error)
+                throw FtpStageTimeoutException(
+                    "conexão TCP de controle em ${controlEndpoint.hostString}:${controlEndpoint.port}",
+                    error,
+                )
+            } catch (error: IOException) {
+                throw FtpControlConnectException(
+                    controlEndpoint.hostString,
+                    controlEndpoint.port,
+                    error,
+                )
             }
         }
         socket = connected
