@@ -26,6 +26,40 @@ data class GameCapabilityMetadata(
         get() = genre?.trim()?.takeIf(String::isNotBlank)
 }
 
+/**
+ * Small process-local read-through catalog used by the existing Library filter
+ * function. Persistent truth remains in [GameCapabilityMetadataStore] on the
+ * data layer; PlayerStateStore hydrates this catalog whenever the cached game
+ * list is loaded. Keeping this cache domain-only lets the current Library UI
+ * gain capability filters without coupling filter logic to Android Context.
+ */
+object GameCapabilityCatalog {
+    private val entries = LinkedHashMap<Long, GameCapabilityMetadata>()
+
+    @Synchronized
+    fun replace(values: Map<Long, GameCapabilityMetadata>) {
+        entries.clear()
+        entries.putAll(values)
+    }
+
+    @Synchronized
+    fun put(titleId: Long, metadata: GameCapabilityMetadata) {
+        entries[titleId] = metadata
+    }
+
+    @Synchronized
+    fun remove(titleId: Long) {
+        entries.remove(titleId)
+    }
+
+    @Synchronized
+    fun metadataFor(titleId: Long): GameCapabilityMetadata =
+        entries[titleId] ?: GameCapabilityMetadata()
+
+    @Synchronized
+    fun snapshot(): Map<Long, GameCapabilityMetadata> = LinkedHashMap(entries)
+}
+
 enum class LibraryCapabilityFilter(val label: String) {
     All("Todos"),
     Kinect("Kinect"),
