@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "echo_readonly_contract.h"
+#include "echo_runtime_info_xbox.h"
 #include "echo_xam_abi.h"
 
 #define ECHOCORE_BUILD_V1 0x00010000U
@@ -35,7 +36,8 @@ void echo_xbox_make_core_info_payload(
         ECHO_CAP_PING |
         ECHO_CAP_CORE_INFO |
         ECHO_CAP_CURRENT_TITLE |
-        ECHO_CAP_FILE_STAT;
+        ECHO_CAP_FILE_STAT |
+        ECHO_CAP_DOCTOR_TELEMETRY;
 
     echo_ro_make_core_info(
         out,
