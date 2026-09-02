@@ -41,6 +41,18 @@ class DoctorStorageAnalyzer {
                 )
             }
 
+            if (mount.objectType != DoctorStorageObjectType.Directory) {
+                add(
+                    finding(
+                        code = CODE_ROOT_NOT_DIRECTORY,
+                        severity = IntegritySeverity.Warning,
+                        title = "Mount não foi reportado como diretório",
+                        evidence = "${mount.canonicalRoot} apareceu como ${mount.objectType.name.lowercase()}.",
+                        action = "Não navegue nem transfira para esta raiz até confirmar o metadata em uma nova leitura.",
+                    ),
+                )
+            }
+
             if (mount.limitReached) {
                 add(
                     finding(
@@ -98,7 +110,7 @@ class DoctorStorageAnalyzer {
                     code = CODE_NO_MOUNTS_VISIBLE,
                     severity = IntegritySeverity.Info,
                     title = "Nenhum mount confirmado",
-                    evidence = "A fonte respondeu, mas nenhum diretório de primeiro nível pôde ser confirmado como mount nesta amostra.",
+                    evidence = "A fonte respondeu, mas a raiz Hdd1 não pôde ser confirmada nesta amostra.",
                     action = "Repita a leitura ou teste outra rota. Isso não é classificado como defeito do armazenamento.",
                 ),
             )
@@ -142,6 +154,7 @@ class DoctorStorageAnalyzer {
     companion object {
         const val CODE_DUPLICATE_ROOT = "storage.root.duplicate"
         const val CODE_UNSAFE_ROOT = "storage.root.unsafe"
+        const val CODE_ROOT_NOT_DIRECTORY = "storage.root.not_directory"
         const val CODE_UNSAFE_ENTRY = "storage.entry.unsafe"
         const val CODE_NEGATIVE_SIZE = "storage.entry.negative_size"
         const val CODE_DIRECTORY_LIMIT_REACHED = "storage.directory.limit_reached"
