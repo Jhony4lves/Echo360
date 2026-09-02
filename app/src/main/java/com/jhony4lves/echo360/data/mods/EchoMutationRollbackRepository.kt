@@ -6,8 +6,8 @@ import com.jhony4lves.echo360.data.sync.SaveVaultStore
 import com.jhony4lves.echo360.domain.mods.RemoteMutationSafetyCode
 import com.jhony4lves.echo360.domain.mods.RemoteMutationSafetyDecision
 import com.jhony4lves.echo360.domain.mods.RemoteMutationSafetyPolicy
+import com.jhony4lves.echo360.domain.sync.SaveVaultPathPolicy
 import com.jhony4lves.echo360.domain.transfer.TransferCancellationToken
-import com.jhony4lves.echo360.domain.xbox.XboxPath
 
 data class EchoRollbackAssessment(
     val snapshotId: String?,
@@ -25,7 +25,14 @@ class EchoMutationRollbackRepository(
         targetCanonicalPath: String,
         cancellationToken: TransferCancellationToken = TransferCancellationToken(),
     ): EchoRollbackAssessment {
-        val target = XboxPath.canonical(targetCanonicalPath)
+        val target = runCatching { SaveVaultPathPolicy.canonicalSourceRoot(targetCanonicalPath) }
+            .getOrElse {
+                return EchoRollbackAssessment(
+                    snapshotId = null,
+                    sourceRoot = null,
+                    decision = RemoteMutationSafetyPolicy.evaluate(targetCanonicalPath, null, null),
+                )
+            }
         val candidates = store.snapshots()
             .asSequence()
             .filter { snapshot -> covers(snapshot.manifest.sourceRoot, target) }
@@ -93,7 +100,8 @@ class EchoMutationRollbackRepository(
     }
 
     private fun covers(rootInput: String, target: String): Boolean {
-        val root = XboxPath.canonical(rootInput).trimEnd('/')
+        val root = runCatching { SaveVaultPathPolicy.canonicalSourceRoot(rootInput) }.getOrNull()
+            ?: return false
         return target.equals(root, ignoreCase = true) || target.startsWith("$root/", ignoreCase = true)
     }
 
