@@ -162,14 +162,25 @@ class EchoCoreReadOnlyCandidateCodecTest {
     }
 
     @Test
-    fun `v1 path encoder rejects unproven aliases traversal root-only colon and bounds`() {
+    fun `Hdd1 Android mount root encodes to bare canonical wire root`() {
+        assertArrayEquals(
+            "Hdd1:".toByteArray(),
+            EchoCoreReadOnlyCandidateCodec.encodeHdd1Path("/Hdd1"),
+        )
+        assertArrayEquals(
+            "Hdd1:".toByteArray(),
+            EchoCoreReadOnlyCandidateCodec.encodeHdd1Path("/Hdd1/"),
+        )
+    }
+
+    @Test
+    fun `v1 path encoder rejects unproven aliases traversal colon and bounds`() {
         val invalid = listOf(
             "/Usb0/Content/file",
             "/fHdd/Content/file",
             "/Hdd1/Content/../flash.xex",
             "/Hdd1//Content/file",
             "/Hdd1/Content/bad:name",
-            "/Hdd1",
             "/Hdd1/Content/\u007f/file",
             "/Hdd1/" + "a".repeat(507),
         )
