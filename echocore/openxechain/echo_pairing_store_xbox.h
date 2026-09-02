@@ -20,8 +20,18 @@ int echo_pairing_xbox_load_secret(
 );
 
 /*
- * Load the existing record or create it transactionally if it is genuinely
- * absent. A corrupt record is never overwritten automatically.
+ * Persist an already-derived Echo360 pairing secret transactionally. This is
+ * intended for the physically launched pairing XEX, not the resident plugin.
+ */
+int echo_pairing_xbox_store_secret(
+    const uint8_t secret[ECHO_AUTH_SECRET_BYTES]
+);
+
+/*
+ * Load the existing record or create a random identity transactionally if it
+ * is genuinely absent. Kept for maintenance/bootstrap tools. The resident
+ * plugin deliberately does not call this function. A corrupt record is never
+ * overwritten automatically.
  */
 int echo_pairing_xbox_ensure_secret(
     uint8_t secret_out[ECHO_AUTH_SECRET_BYTES]
