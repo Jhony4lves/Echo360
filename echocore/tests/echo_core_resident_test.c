@@ -3,7 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#define _start echo_test_resident_entry
 #include "../openxechain/echo_core_resident.c"
+#undef _start
 
 static uint32_t g_create_calls;
 static uint32_t g_wait_calls;
@@ -128,7 +130,7 @@ static void run_captured_worker(void) {
 
 static void test_attach_creates_one_raw_system_thread(void) {
     reset_fixture();
-    assert(_start(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
     assert(g_create_calls == 1U);
     assert(g_last_creation_flags == ECHO_EX_CREATE_FLAG_SYSTEM);
     assert(g_last_xapi_startup == NULL);
@@ -137,7 +139,7 @@ static void test_attach_creates_one_raw_system_thread(void) {
     assert(g_echo_resident_thread_handle == UINT32_C(0x51515151));
     assert(g_echo_resident_stop_requested == 0U);
 
-    assert(_start(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
     assert(g_create_calls == 1U);
 }
 
@@ -145,7 +147,7 @@ static void test_thread_creation_failure_fails_attach_closed(void) {
     reset_fixture();
     g_create_status = -1;
     memset(g_echo_resident_secret, 0xAA, sizeof(g_echo_resident_secret));
-    assert(_start(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 0);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 0);
     assert(g_create_calls == 1U);
     assert(g_echo_resident_stop_requested == 1U);
     assert(g_echo_resident_thread_handle == ECHO_RESIDENT_THREAD_HANDLE_NONE);
@@ -154,7 +156,7 @@ static void test_thread_creation_failure_fails_attach_closed(void) {
 
 static void test_missing_pairing_never_starts_listener(void) {
     reset_fixture();
-    assert(_start(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
     g_pairing_status = ECHO_PAIRING_STORE_NOT_FOUND;
     run_captured_worker();
     assert(g_pairing_calls == 1U);
@@ -166,7 +168,7 @@ static void test_missing_pairing_never_starts_listener(void) {
 
 static void test_valid_pairing_reaches_server_then_secret_is_wiped(void) {
     reset_fixture();
-    assert(_start(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
     g_pairing_status = ECHO_PAIRING_STORE_OK;
     g_server_status = ECHO_NET_IO_ERROR;
     run_captured_worker();
@@ -181,7 +183,7 @@ static void test_valid_pairing_reaches_server_then_secret_is_wiped(void) {
 
 static void test_pre_requested_stop_skips_pairing_and_server(void) {
     reset_fixture();
-    assert(_start(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
     g_echo_resident_stop_requested = 1U;
     run_captured_worker();
     assert(g_pairing_calls == 0U);
@@ -191,11 +193,11 @@ static void test_pre_requested_stop_skips_pairing_and_server(void) {
 
 static void test_detach_requests_stop_joins_closes_and_wipes(void) {
     reset_fixture();
-    assert(_start(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
     memset(g_echo_resident_secret, 0xCC, sizeof(g_echo_resident_secret));
     g_echo_resident_worker_running = 1U;
 
-    assert(_start(NULL, ECHO_DLL_PROCESS_DETACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_DETACH, NULL) == 1);
     assert(g_echo_resident_stop_requested == 1U);
     assert(g_wait_calls == 1U);
     assert(g_close_calls == 1U);
@@ -206,9 +208,9 @@ static void test_detach_requests_stop_joins_closes_and_wipes(void) {
 
 static void test_thread_notifications_are_noops(void) {
     reset_fixture();
-    assert(_start(NULL, ECHO_DLL_THREAD_ATTACH, NULL) == 1);
-    assert(_start(NULL, ECHO_DLL_THREAD_DETACH, NULL) == 1);
-    assert(_start(NULL, 99U, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_THREAD_ATTACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_THREAD_DETACH, NULL) == 1);
+    assert(echo_test_resident_entry(NULL, 99U, NULL) == 1);
     assert(g_create_calls == 0U);
     assert(g_wait_calls == 0U);
 }
