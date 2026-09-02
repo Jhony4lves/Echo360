@@ -1,0 +1,116 @@
+name: EchoCore XEX CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/echocore-xex-ci.yml"
+      - "echocore/**"
+
+permissions:
+  contents: read
+
+env:
+  OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
+  OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
+
+jobs:
+  toolchain:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            binutils \
+            ninja-build \
+            make \
+            python3 \
+            python3-pip \
+            git \
+            zlib1g-dev
+          python3 -m pip install --user "cmake==3.31.10"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/cmake" --version
+
+      - name: Restore minimal OpenXeChain cache
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-min-v2-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
+
+      - name: Clone pinned OpenXeChain sources
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git clone --no-checkout --filter=blob:none https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
+          cd /tmp/openxechain
+          git checkout "$OPENXECHAIN_BUILD_SHA"
+          git submodule sync --recursive
+          git submodule update --init --depth 1 llvm xecorelib synthxex
+          test "$(git rev-parse HEAD)" = "$OPENXECHAIN_BUILD_SHA"
+          git submodule status llvm xecorelib synthxex
+
+      - name: Build minimal OpenXeChain toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          : > /tmp/echocore-toolchain-build.log
+          bash echocore/openxechain/build-minimal-toolchain.sh /tmp/openxechain \
+            2>&1 | tee /tmp/echocore-toolchain-build.log
+
+      - name: Upload toolchain build log
+        if: always() && steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocore-toolchain-log-${{ github.sha }}
+          path: /tmp/echocore-toolchain-build.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Verify minimal toolchain
+        run: |
+          test -x "$OPENXECHAIN_SYSROOT/bin/clang"
+          test -x "$OPENXECHAIN_SYSROOT/bin/lld-link"
+          test -x "$OPENXECHAIN_SYSROOT/bin/llvm-ar"
+          test -x "$OPENXECHAIN_SYSROOT/bin/llvm-dlltool"
+          test -x "$OPENXECHAIN_SYSROOT/bin/synthxex"
+          test -s "$OPENXECHAIN_SYSROOT/lib/xecorelib.a"
+          "$OPENXECHAIN_SYSROOT/bin/clang" --version
+          "$OPENXECHAIN_SYSROOT/bin/synthxex" --help || true
+
+  echocore:
+    needs: toolchain
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Restore proven minimal OpenXeChain toolchain
+        id: toolchain-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-min-v2-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
+          fail-on-cache-miss: true
+
+      - name: Build EchoCore XEX
+        run: |
+          bash echocore/openxechain/build-echo-core.sh
+
+      - name: Upload EchoCore hardware bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoCore-XEX-${{ github.sha }}
+          path: /tmp/echocore-build/EchoCore.xex
+          if-no-files-found: error
+          retention-days: 30
