@@ -51,6 +51,27 @@
 #define ECHO_CORE_STATUS_NETWORK_LINK_ACTIVE (1U << 0)
 #define ECHO_CORE_STATUS_RESIDENT_PLUGIN      (1U << 1)
 
+/*
+ * DIR_LIST response payload, contract v1:
+ *   0  u8 status
+ *   1  u8 limit_reached
+ *   2  u16 emitted_entries
+ *   4  repeated entries:
+ *        u8 object_type
+ *        u8 reserved = 0
+ *        u16 name_length
+ *        u64 size (0 for directories)
+ *        name_length raw ANSI/UTF-8-compatible bytes, no NUL
+ *
+ * Worst-case payload is intentionally bounded and caller-owned. Xbox runtime
+ * must not place this maximum-size buffer on a small worker-thread stack.
+ */
+#define ECHO_DIR_LIST_HEADER_BYTES 4U
+#define ECHO_DIR_ENTRY_HEADER_BYTES 12U
+#define ECHO_DIR_LIST_MAX_PAYLOAD_BYTES \
+    (ECHO_DIR_LIST_HEADER_BYTES + \
+     ECHO_MAX_DIR_ENTRIES * (ECHO_DIR_ENTRY_HEADER_BYTES + ECHO_MAX_NAME_BYTES))
+
 static inline uint16_t echo_ro_read_be16(const uint8_t *p) {
     return (uint16_t)(((uint16_t)p[0] << 8U) | (uint16_t)p[1]);
 }
@@ -125,6 +146,49 @@ static inline void echo_ro_make_file_stat(
     echo_ro_write_be16(out + 2U, 0U);
     echo_ro_write_be32(out + 4U, 0U);
     echo_ro_write_be64(out + 8U, size);
+}
+
+static inline void echo_ro_make_dir_list_header(
+    uint8_t out[ECHO_DIR_LIST_HEADER_BYTES],
+    uint8_t status,
+    uint8_t limit_reached,
+    uint16_t emitted_entries
+) {
+    out[0] = status;
+    out[1] = limit_reached != 0U ? 1U : 0U;
+    echo_ro_write_be16(out + 2U, emitted_entries);
+}
+
+static inline uint32_t echo_ro_dir_entry_encoded_size(uint16_t name_length) {
+    if (name_length == 0U || name_length > ECHO_MAX_NAME_BYTES) return 0U;
+    return ECHO_DIR_ENTRY_HEADER_BYTES + (uint32_t)name_length;
+}
+
+static inline uint32_t echo_ro_write_dir_entry(
+    uint8_t *out,
+    uint32_t capacity,
+    uint8_t object_type,
+    uint64_t size,
+    const uint8_t *name,
+    uint16_t name_length
+) {
+    uint32_t encoded_size = echo_ro_dir_entry_encoded_size(name_length);
+    uint32_t i;
+
+    if (out == NULL || name == NULL || encoded_size == 0U || capacity < encoded_size ||
+        (object_type != ECHO_OBJECT_FILE && object_type != ECHO_OBJECT_DIRECTORY)) {
+        return 0U;
+    }
+
+    out[0] = object_type;
+    out[1] = 0U;
+    echo_ro_write_be16(out + 2U, name_length);
+    echo_ro_write_be64(out + 4U, object_type == ECHO_OBJECT_DIRECTORY ? UINT64_C(0) : size);
+    for (i = 0U; i < (uint32_t)name_length; ++i) {
+        if (name[i] == 0U) return 0U;
+        out[ECHO_DIR_ENTRY_HEADER_BYTES + i] = name[i];
+    }
+    return encoded_size;
 }
 
 static inline int echo_ro_validate_path_payload(const uint8_t *payload, uint32_t payload_length) {
