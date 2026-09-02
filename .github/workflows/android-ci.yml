@@ -36,7 +36,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up stable debug signing
+      - name: Set up stable signing key
         run: |
           mkdir -p "$HOME/.android"
           base64 --decode .github/echo360-debug-keystore.b64 > "$HOME/.android/debug.keystore"
@@ -62,6 +62,30 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
 
+      - name: Build release APK
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Sign release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS_VERSION="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)"
+          ZIPALIGN="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="/tmp/Echo360-release-aligned.apk"
+          SIGNED="app/build/outputs/apk/release/Echo360-release.apk"
+
+          "$ZIPALIGN" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$APKSIGNER" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out "$SIGNED" \
+            "$ALIGNED"
+          "$APKSIGNER" verify --verbose "$SIGNED"
+
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
 
@@ -72,3 +96,11 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo360-release-${{ github.sha }}
+          path: app/build/outputs/apk/release/Echo360-release.apk
+          if-no-files-found: error
+          retention-days: 30
