@@ -95,14 +95,24 @@ internal class RemoteGameIntegrityProbe {
                 message = "O executável existe, mas está vazio.",
             )
 
-            else -> resultWithFinding(
+            listing.isNotEmpty() -> resultWithFinding(
                 game = game,
                 code = CODE_EXECUTABLE_MISSING,
                 severity = IntegritySeverity.Error,
                 title = "Executável não encontrado no Xbox",
-                evidence = "O diretório $directory foi lido, mas $executable não apareceu no LIST nem respondeu a SIZE.",
+                evidence = "O diretório $directory retornou ${listing.size} entrada(s), mas $executable não apareceu no LIST nem respondeu a SIZE.",
                 action = "Confirme a pasta de instalação e a integridade da cópia antes de alterar o catálogo do Aurora.",
-                message = "O diretório responde, mas o executável catalogado está ausente.",
+                message = "O diretório responde com conteúdo, mas o executável catalogado está ausente.",
+            )
+
+            else -> resultWithFinding(
+                game = game,
+                code = CODE_EMPTY_OR_UNPARSED_LIST,
+                severity = IntegritySeverity.Info,
+                title = "Listagem remota inconclusiva",
+                evidence = "LIST de $directory não produziu entradas interpretáveis e SIZE não confirmou $executable.",
+                action = "Tente novamente por outra rota FTP antes de concluir que o executável está ausente.",
+                message = "A pasta respondeu sem entradas interpretáveis; a existência do executável ficou inconclusiva.",
             )
         }
     }
@@ -184,6 +194,7 @@ internal class RemoteGameIntegrityProbe {
 
     companion object {
         const val CODE_DIRECTORY_UNREADABLE = "remote.directory.unreadable"
+        const val CODE_EMPTY_OR_UNPARSED_LIST = "remote.directory.empty_or_unparsed"
         const val CODE_EXECUTABLE_MISSING = "remote.executable.missing"
         const val CODE_EXECUTABLE_EMPTY = "remote.executable.empty"
         const val CODE_EXECUTABLE_IS_DIRECTORY = "remote.executable.is_directory"
