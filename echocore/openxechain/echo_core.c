@@ -1,6 +1,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "echo_protocol.h"
+
 /*
  * EchoCore Phase 1 hardware bootstrap.
  *
@@ -8,7 +10,7 @@
  * - Xbox title caller only (1)
  * - one TCP listener on port 36000
  * - one client
- * - one EchoLink PING -> PONG exchange
+ * - one strict EchoLink PING -> PONG exchange
  * - no heap, filesystem, launch, NAND or memory-control APIs
  * - always closes sockets and returns to the loader
  *
@@ -21,16 +23,6 @@
 #define ECHO_AF_INET 2U
 #define ECHO_SOCK_STREAM 1U
 #define ECHO_INVALID_SOCKET 0xFFFFFFFFU
-
-#define ECHO_MAGIC_0 0x45U /* E */
-#define ECHO_MAGIC_1 0x43U /* C */
-#define ECHO_MAGIC_2 0x48U /* H */
-#define ECHO_MAGIC_3 0x4FU /* O */
-#define ECHO_VERSION 1U
-#define ECHO_TYPE_PING 0x01U
-#define ECHO_TYPE_PONG 0x02U
-#define ECHO_HEADER_BYTES 16U
-#define ECHO_BOOTSTRAP_MAX_PAYLOAD 64U
 #define ECHO_PORT_HIGH 0x8CU /* 36000 == 0x8CA0 */
 #define ECHO_PORT_LOW 0xA0U
 
@@ -52,13 +44,6 @@ static void echo_zero(void *buffer, size_t length) {
     for (i = 0; i < length; ++i) {
         bytes[i] = 0;
     }
-}
-
-static uint32_t echo_read_be32(const uint8_t *bytes) {
-    return ((uint32_t)bytes[0] << 24U) |
-           ((uint32_t)bytes[1] << 16U) |
-           ((uint32_t)bytes[2] << 8U) |
-           (uint32_t)bytes[3];
 }
 
 static int echo_recv_exact(uint32_t socket_handle, void *buffer, uint32_t length) {
@@ -103,38 +88,24 @@ static int echo_send_exact(uint32_t socket_handle, const void *buffer, uint32_t 
 
 static int echo_handle_ping(uint32_t client) {
     uint8_t header[ECHO_HEADER_BYTES];
-    uint8_t payload[ECHO_BOOTSTRAP_MAX_PAYLOAD];
-    uint32_t payload_length;
+    uint8_t nonce[ECHO_PING_PAYLOAD_BYTES];
 
     if (echo_recv_exact(client, header, ECHO_HEADER_BYTES) != 0) {
         return -1;
     }
-
-    if (header[0] != ECHO_MAGIC_0 ||
-        header[1] != ECHO_MAGIC_1 ||
-        header[2] != ECHO_MAGIC_2 ||
-        header[3] != ECHO_MAGIC_3 ||
-        header[4] != ECHO_VERSION ||
-        header[5] != ECHO_TYPE_PING) {
+    if (echo_validate_ping_header(header) != 0) {
+        return -1;
+    }
+    if (echo_recv_exact(client, nonce, ECHO_PING_PAYLOAD_BYTES) != 0) {
         return -1;
     }
 
-    payload_length = echo_read_be32(header + 8U);
-    if (payload_length > ECHO_BOOTSTRAP_MAX_PAYLOAD) {
-        return -1;
-    }
-
-    if (payload_length > 0U && echo_recv_exact(client, payload, payload_length) != 0) {
-        return -1;
-    }
-
-    /* Preserve flags, payload length and request ID byte-for-byte. */
-    header[5] = ECHO_TYPE_PONG;
+    echo_make_pong_header(header);
 
     if (echo_send_exact(client, header, ECHO_HEADER_BYTES) != 0) {
         return -1;
     }
-    if (payload_length > 0U && echo_send_exact(client, payload, payload_length) != 0) {
+    if (echo_send_exact(client, nonce, ECHO_PING_PAYLOAD_BYTES) != 0) {
         return -1;
     }
 
