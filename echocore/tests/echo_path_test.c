@@ -6,30 +6,20 @@
 
 static void expect_route(const char *canonical, const char *expected, int require_write) {
     char output[256];
-    size_t written = echo_path_to_kernel(
-        canonical,
-        strlen(canonical),
-        output,
-        sizeof(output),
-        require_write
-    );
+    size_t written = echo_path_to_kernel(canonical, strlen(canonical), output, sizeof(output), require_write);
     assert(written == strlen(expected));
     assert(strcmp(output, expected) == 0);
 }
 
 static void expect_rejected(const char *canonical, int require_write) {
     char output[256];
-    assert(echo_path_to_kernel(
-        canonical,
-        strlen(canonical),
-        output,
-        sizeof(output),
-        require_write
-    ) == 0U);
+    assert(echo_path_to_kernel(canonical, strlen(canonical), output, sizeof(output), require_write) == 0U);
 }
 
 int main(void) {
     echo_path_info info;
+    char too_long[ECHO_CANONICAL_PATH_MAX_BYTES + 2U];
+    size_t i;
 
     expect_route("/Hdd1", "\\Device\\Harddisk0\\Partition1", 0);
     expect_route("/Hdd1/Games/Dark Souls II", "\\Device\\Harddisk0\\Partition1\\Games\\Dark Souls II", 1);
@@ -50,6 +40,11 @@ int main(void) {
     expect_rejected("/Hdd1\\Games", 0);
     expect_rejected("Hdd1/Games", 0);
     expect_rejected("/Unknown/Games", 0);
+
+    memcpy(too_long, "/Hdd1/", 6U);
+    for (i = 6U; i < ECHO_CANONICAL_PATH_MAX_BYTES + 1U; ++i) too_long[i] = 'a';
+    too_long[ECHO_CANONICAL_PATH_MAX_BYTES + 1U] = '\0';
+    expect_rejected(too_long, 0);
 
     puts("EchoCore path tests: OK");
     return 0;
