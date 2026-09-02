@@ -8,13 +8,18 @@
 #define ECHO_AUTH_SECRET_BYTES 32U
 #define ECHO_AUTH_HMAC_SHA1_BYTES 20U
 
-#define ECHO_CAP_PING            (UINT64_C(1) << 0)
-#define ECHO_CAP_READ_INFO       (UINT64_C(1) << 1)
-#define ECHO_CAP_READ_FILESYSTEM (UINT64_C(1) << 2)
+#define ECHO_CAP_PING             (UINT64_C(1) << 0)
+#define ECHO_CAP_READ_INFO        (UINT64_C(1) << 1)
+#define ECHO_CAP_READ_FILESYSTEM  (UINT64_C(1) << 2)
 #define ECHO_CAP_WRITE_FILESYSTEM (UINT64_C(1) << 3)
-#define ECHO_CAP_LAUNCH          (UINT64_C(1) << 4)
-#define ECHO_CAP_SYSTEM_CONTROL  (UINT64_C(1) << 5)
-#define ECHO_CAP_PATCH           (UINT64_C(1) << 6)
+#define ECHO_CAP_LAUNCH           (UINT64_C(1) << 4)
+#define ECHO_CAP_SYSTEM_CONTROL   (UINT64_C(1) << 5)
+#define ECHO_CAP_PATCH            (UINT64_C(1) << 6)
+#define ECHO_CAP_ALL (
+    ECHO_CAP_PING | ECHO_CAP_READ_INFO | ECHO_CAP_READ_FILESYSTEM | \
+    ECHO_CAP_WRITE_FILESYSTEM | ECHO_CAP_LAUNCH | ECHO_CAP_SYSTEM_CONTROL | \
+    ECHO_CAP_PATCH
+)
 
 /*
  * Authentication policy state only.
@@ -86,6 +91,10 @@ static int echo_auth_session_begin(
 /*
  * Call only after the platform crypto layer has verified the authentication
  * response against this session id + challenge + counter.
+ *
+ * Unknown capability bits are rejected rather than ignored. This prevents an
+ * older EchoCore from authenticating a capability it does not understand and
+ * accidentally changing its meaning in a later protocol version.
  */
 static int echo_auth_mark_authenticated(
     echo_auth_state *state,
@@ -94,7 +103,8 @@ static int echo_auth_mark_authenticated(
 ) {
     if (state == NULL || state->session_id == UINT64_C(0) ||
         state->challenge_active == 0U || state->authenticated != 0U ||
-        counter == UINT64_C(0)) {
+        counter == UINT64_C(0) ||
+        (granted_capabilities & ~ECHO_CAP_ALL) != UINT64_C(0)) {
         return -1;
     }
 
@@ -122,7 +132,8 @@ static int echo_auth_commit_counter(echo_auth_state *state, uint64_t counter) {
 }
 
 static int echo_auth_has_capability(const echo_auth_state *state, uint64_t capability) {
-    if (state == NULL || capability == UINT64_C(0)) {
+    if (state == NULL || capability == UINT64_C(0) ||
+        (capability & ~ECHO_CAP_ALL) != UINT64_C(0)) {
         return 0;
     }
 
