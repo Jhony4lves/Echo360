@@ -165,5 +165,7 @@ internal fun GameDetailBackgroundHero(
         GameIntegritySummary(game)
         Spacer(Modifier.height(12.dp))
         GameRuntimeIdentitySummary(game)
+        Spacer(Modifier.height(12.dp))
+        GameLaunchReadinessSummary(game)
     }
 }
