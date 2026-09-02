@@ -24,7 +24,7 @@ import com.jhony4lves.echo360.ui.stats.EchoStatsScreen
 import com.jhony4lves.echo360.ui.system.XboxSystemScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
 import com.jhony4lves.echo360.ui.theme.EchoTheme
-import com.jhony4lves.echo360.ui.transfer.EchoTransferHostScreen
+import com.jhony4lves.echo360.ui.transfer.EchoFilesHubScreen
 
 private enum class EchoDestination(
     val shortLabel: String,
@@ -83,7 +83,7 @@ fun Echo360App() {
                         modifier = Modifier.padding(innerPadding),
                     )
 
-                    EchoDestination.Transfer -> EchoTransferHostScreen(
+                    EchoDestination.Transfer -> EchoFilesHubScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
 
