@@ -20,6 +20,9 @@ enum class LibraryFilter(val label: String) {
     Playing("Jogando"),
     Backlog("Quero jogar"),
     Finished("Finalizados"),
+    Kinect("Kinect"),
+    LocalMultiplayer("Multiplayer local"),
+    Genre("Gênero"),
 }
 
 fun filterLibraryGames(
@@ -33,27 +36,37 @@ fun filterLibraryGames(
 ): List<GameEntry> {
     val normalizedQuery = query.trim()
     val normalizedGenre = genreFilter?.trim()?.takeIf(String::isNotBlank)
+
+    fun metadataFor(game: GameEntry): GameCapabilityMetadata =
+        metadata[game.titleId] ?: GameCapabilityCatalog.metadataFor(game.titleId)
+
     return games
         .asSequence()
         .filter { game ->
-            val gameMetadata = metadata[game.titleId]
+            val gameMetadata = metadataFor(game)
             normalizedQuery.isBlank() ||
                 game.title.contains(normalizedQuery, ignoreCase = true) ||
                 game.titleIdHex.contains(normalizedQuery, ignoreCase = true) ||
-                gameMetadata?.normalizedGenre?.contains(normalizedQuery, ignoreCase = true) == true
+                gameMetadata.normalizedGenre?.contains(normalizedQuery, ignoreCase = true) == true
         }
         .filter { game ->
             val state = states[game.stableKey] ?: PlayerGameState()
+            val gameMetadata = metadataFor(game)
             when (filter) {
                 LibraryFilter.All -> true
                 LibraryFilter.Favorites -> state.favorite
                 LibraryFilter.Playing -> state.status == GameStatus.Playing
                 LibraryFilter.Backlog -> state.status == GameStatus.WantToPlay
                 LibraryFilter.Finished -> state.status == GameStatus.Finished
+                LibraryFilter.Kinect ->
+                    gameMetadata.kinect == KinectSupport.Supported ||
+                        gameMetadata.kinect == KinectSupport.Required
+                LibraryFilter.LocalMultiplayer -> gameMetadata.hasLocalMultiplayer == true
+                LibraryFilter.Genre -> gameMetadata.normalizedGenre != null
             }
         }
         .filter { game ->
-            val gameMetadata = metadata[game.titleId] ?: GameCapabilityMetadata()
+            val gameMetadata = metadataFor(game)
             when (capabilityFilter) {
                 LibraryCapabilityFilter.All -> true
                 LibraryCapabilityFilter.Kinect ->
@@ -64,7 +77,7 @@ fun filterLibraryGames(
         }
         .filter { game ->
             normalizedGenre == null ||
-                metadata[game.titleId]?.normalizedGenre?.equals(normalizedGenre, ignoreCase = true) == true
+                metadataFor(game).normalizedGenre?.equals(normalizedGenre, ignoreCase = true) == true
         }
         .sortedWith(
             compareByDescending<GameEntry> { states[it.stableKey]?.lastPlayedAt ?: 0L }
