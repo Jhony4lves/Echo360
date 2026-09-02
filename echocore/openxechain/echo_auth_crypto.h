@@ -9,7 +9,7 @@
 #define ECHO_AUTH_DOMAIN_BYTES 16U
 #define ECHO_AUTH_RESPONSE_TRANSCRIPT_BYTES 56U
 
-static void echo_auth_write_be64(uint8_t out[8], uint64_t value) {
+static inline void echo_auth_write_be64(uint8_t out[8], uint64_t value) {
     out[0] = (uint8_t)(value >> 56U);
     out[1] = (uint8_t)(value >> 48U);
     out[2] = (uint8_t)(value >> 40U);
@@ -20,7 +20,7 @@ static void echo_auth_write_be64(uint8_t out[8], uint64_t value) {
     out[7] = (uint8_t)value;
 }
 
-static uint64_t echo_auth_read_be64(const uint8_t in[8]) {
+static inline uint64_t echo_auth_read_be64(const uint8_t in[8]) {
     return ((uint64_t)in[0] << 56U) |
            ((uint64_t)in[1] << 48U) |
            ((uint64_t)in[2] << 40U) |
@@ -31,7 +31,7 @@ static uint64_t echo_auth_read_be64(const uint8_t in[8]) {
            (uint64_t)in[7];
 }
 
-static int echo_auth_bytes_all_zero(const uint8_t *bytes, size_t length) {
+static inline int echo_auth_bytes_all_zero(const uint8_t *bytes, size_t length) {
     uint8_t any = 0U;
     size_t i;
     if (bytes == NULL) return 1;
@@ -39,7 +39,7 @@ static int echo_auth_bytes_all_zero(const uint8_t *bytes, size_t length) {
     return any == 0U ? 1 : 0;
 }
 
-static int echo_auth_constant_time_equal(
+static inline int echo_auth_constant_time_equal(
     const uint8_t *left,
     const uint8_t *right,
     size_t length
@@ -53,7 +53,7 @@ static int echo_auth_constant_time_equal(
     return difference == 0U ? 1 : 0;
 }
 
-static int echo_auth_make_response_transcript(
+static inline int echo_auth_make_response_transcript(
     uint8_t out[ECHO_AUTH_RESPONSE_TRANSCRIPT_BYTES],
     uint64_t session_id,
     const uint8_t challenge[ECHO_AUTH_CHALLENGE_BYTES],
