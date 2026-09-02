@@ -15,7 +15,7 @@ env:
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
 
 jobs:
-  protocol-host:
+  core-host-tests:
     runs-on: ubuntu-22.04
     timeout-minutes: 5
 
@@ -23,19 +23,27 @@ jobs:
       - name: Checkout Echo360
         uses: actions/checkout@v5
 
-      - name: Compile strict EchoLink parser tests
+      - name: Compile EchoCore host tests
         run: |
-          clang \
-            -std=c11 \
-            -Wall \
-            -Wextra \
-            -Werror \
-            -pedantic \
+          for source in \
             echocore/tests/echo_protocol_test.c \
-            -o /tmp/echo_protocol_test
+            echocore/tests/echo_path_test.c
+          do
+            name="$(basename "$source" .c)"
+            clang \
+              -std=c11 \
+              -Wall \
+              -Wextra \
+              -Werror \
+              -pedantic \
+              "$source" \
+              -o "/tmp/$name"
+          done
 
-      - name: Run strict EchoLink parser tests
-        run: /tmp/echo_protocol_test
+      - name: Run EchoCore host tests
+        run: |
+          /tmp/echo_protocol_test
+          /tmp/echo_path_test
 
   toolchain:
     runs-on: ubuntu-22.04
@@ -110,7 +118,7 @@ jobs:
 
   echocore:
     needs:
-      - protocol-host
+      - core-host-tests
       - toolchain
     runs-on: ubuntu-22.04
     timeout-minutes: 15
