@@ -27,7 +27,8 @@ jobs:
         run: |
           for source in \
             echocore/tests/echo_protocol_test.c \
-            echocore/tests/echo_path_test.c
+            echocore/tests/echo_path_test.c \
+            echocore/tests/echo_transfer_state_test.c
           do
             name="$(basename "$source" .c)"
             clang \
@@ -44,6 +45,7 @@ jobs:
         run: |
           /tmp/echo_protocol_test
           /tmp/echo_path_test
+          /tmp/echo_transfer_state_test
 
   toolchain:
     runs-on: ubuntu-22.04
