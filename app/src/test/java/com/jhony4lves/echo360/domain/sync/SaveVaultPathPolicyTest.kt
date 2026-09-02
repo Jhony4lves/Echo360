@@ -1,7 +1,7 @@
 package com.jhony4lves.echo360.domain.sync
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFailsWith
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class SaveVaultPathPolicyTest {
@@ -16,15 +16,15 @@ class SaveVaultPathPolicyTest {
             SaveVaultPathPolicy.canonicalSourceRoot("/Usb0/Content/Profile"),
         )
 
-        assertFailsWith<IllegalArgumentException> { SaveVaultPathPolicy.canonicalSourceRoot("/Hdd1") }
-        assertFailsWith<IllegalArgumentException> { SaveVaultPathPolicy.canonicalSourceRoot("/Usb0/") }
-        assertFailsWith<IllegalArgumentException> { SaveVaultPathPolicy.canonicalSourceRoot("/Flash/launch.ini") }
+        assertThrows(IllegalArgumentException::class.java) { SaveVaultPathPolicy.canonicalSourceRoot("/Hdd1") }
+        assertThrows(IllegalArgumentException::class.java) { SaveVaultPathPolicy.canonicalSourceRoot("/Usb0/") }
+        assertThrows(IllegalArgumentException::class.java) { SaveVaultPathPolicy.canonicalSourceRoot("/Flash/launch.ini") }
     }
 
     @Test
     fun `rejects traversal separators and controls in remote names`() {
         listOf("..", ".", "folder/name", "folder\\name", "bad\u0000name", "bad\nname").forEach { name ->
-            assertFailsWith<IllegalArgumentException> {
+            assertThrows(IllegalArgumentException::class.java) {
                 SaveVaultPathPolicy.childRelativePath("Content", name)
             }
         }
@@ -47,7 +47,7 @@ class SaveVaultPathPolicyTest {
             ),
         )
 
-        assertFailsWith<IllegalArgumentException> {
+        assertThrows(IllegalArgumentException::class.java) {
             SaveVaultPathPolicy.canonicalRemoteFile(
                 "/Hdd1/Content/Profile",
                 "../Other/save.bin",
