@@ -8,11 +8,12 @@ import com.jhony4lves.echo360.domain.transfer.RemoteTransferFile
 import com.jhony4lves.echo360.domain.transfer.TransferAnalysis
 import com.jhony4lves.echo360.domain.transfer.TransferCancellationToken
 import com.jhony4lves.echo360.domain.transfer.TransferCompareEngine
-import com.jhony4lves.echo360.domain.transfer.TransferDiffKind
 import com.jhony4lves.echo360.domain.transfer.TransferDiffItem
+import com.jhony4lves.echo360.domain.transfer.TransferDiffKind
 import com.jhony4lves.echo360.domain.transfer.TransferExecutionProgress
 import com.jhony4lves.echo360.domain.transfer.TransferExecutionResult
 import com.jhony4lves.echo360.domain.transfer.TransferExecutionStatus
+import com.jhony4lves.echo360.domain.transfer.TransferHistoryEntry
 import com.jhony4lves.echo360.domain.xbox.XboxPath
 import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.network.ftp.FtpRetryPolicy
@@ -21,6 +22,7 @@ import com.jhony4lves.echo360.network.ftp.RemoteEntry
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
 import kotlinx.coroutines.delay
+import java.util.UUID
 import kotlin.math.roundToLong
 
 class EchoTransferRepository(
@@ -32,6 +34,7 @@ class EchoTransferRepository(
     private val appContext = context.applicationContext
     private val configStore = SecureXboxConfigStore(appContext)
     private val localScanner = LocalDocumentTreeScanner(appContext)
+    private val historyStore = TransferHistoryStore(appContext)
 
     suspend fun analyze(
         localTreeUri: Uri,
@@ -77,6 +80,7 @@ class EchoTransferRepository(
      * are retried on the same route with bounded backoff, restarting the current
      * file from byte zero. In Auto mode, exhausted Fast retries fall back to
      * FTPdll Background. Every successful STOR is verified with a remote SIZE.
+     * Every terminal run is persisted in the local transfer history.
      */
     suspend fun execute(
         analysis: TransferAnalysis,
@@ -108,6 +112,7 @@ class EchoTransferRepository(
 
         val profile = configuredProfile()
         val totalBytes = queue.sumOf { it.local.size }
+        val startedAtEpochMs = System.currentTimeMillis()
         val startedAt = System.nanoTime()
 
         var session: XboxFtpSession? = null
@@ -116,6 +121,7 @@ class EchoTransferRepository(
         var fallbackReason = analysis.fallbackReason
         var completedBytes = 0L
         var verifiedFiles = 0
+        var totalRetryCount = 0
         var lastProgressAt = 0L
         var currentFile: String? = null
 
@@ -177,6 +183,31 @@ class EchoTransferRepository(
             routed.fallbackReason?.let { reason -> fallbackReason = reason }
         }
 
+        fun persistTerminal(result: TransferExecutionResult): TransferExecutionResult {
+            runCatching {
+                historyStore.append(
+                    TransferHistoryEntry(
+                        id = UUID.randomUUID().toString(),
+                        startedAtEpochMs = startedAtEpochMs,
+                        finishedAtEpochMs = System.currentTimeMillis(),
+                        requestedRoute = analysis.requestedRoute,
+                        usedRoute = result.route,
+                        status = result.status,
+                        fileCount = queue.size,
+                        verifiedFiles = result.verifiedFiles,
+                        transferredBytes = result.transferredBytes,
+                        totalBytes = totalBytes,
+                        retryCount = totalRetryCount,
+                        remoteRoot = analysis.remoteRoot,
+                        failedFile = result.failedFile,
+                        fallbackReason = result.fallbackReason,
+                        message = result.message,
+                    ),
+                )
+            }
+            return result
+        }
+
         fun cancelledResult(): TransferExecutionResult = TransferExecutionResult(
             status = TransferExecutionStatus.Cancelled,
             route = activeRoute ?: desiredRoute,
@@ -195,7 +226,7 @@ class EchoTransferRepository(
                 force = true,
             )
 
-            if (cancellationToken.isCancelled()) return cancelledResult()
+            if (cancellationToken.isCancelled()) return persistTerminal(cancelledResult())
 
             queue.forEachIndexed { index, item ->
                 currentFile = item.relativePath
@@ -272,6 +303,7 @@ class EchoTransferRepository(
 
                         if (canRetrySameRoute) {
                             sameRouteRetries += 1
+                            totalRetryCount += 1
                             val waitMs = retryPolicy.delayMsForRetry(sameRouteRetries)
                             desiredRoute = failureRoute
                             emit(
@@ -318,15 +350,17 @@ class EchoTransferRepository(
                             message = error.message ?: "Falha durante a transferência.",
                             force = true,
                         )
-                        return TransferExecutionResult(
-                            status = TransferExecutionStatus.Failed,
-                            route = activeRoute ?: failureRoute,
-                            uploadedFiles = verifiedFiles,
-                            verifiedFiles = verifiedFiles,
-                            transferredBytes = completedBytes,
-                            fallbackReason = fallbackReason,
-                            failedFile = item.relativePath,
-                            message = error.message ?: "Falha durante a transferência.",
+                        return persistTerminal(
+                            TransferExecutionResult(
+                                status = TransferExecutionStatus.Failed,
+                                route = activeRoute ?: failureRoute,
+                                uploadedFiles = verifiedFiles,
+                                verifiedFiles = verifiedFiles,
+                                transferredBytes = completedBytes,
+                                fallbackReason = fallbackReason,
+                                failedFile = item.relativePath,
+                                message = error.message ?: "Falha durante a transferência.",
+                            ),
                         )
                     }
                 }
@@ -339,14 +373,16 @@ class EchoTransferRepository(
                 message = "$verifiedFiles arquivo(s) enviados e verificados.",
                 force = true,
             )
-            return TransferExecutionResult(
-                status = TransferExecutionStatus.Completed,
-                route = activeRoute ?: desiredRoute,
-                uploadedFiles = verifiedFiles,
-                verifiedFiles = verifiedFiles,
-                transferredBytes = completedBytes,
-                fallbackReason = fallbackReason,
-                message = "$verifiedFiles arquivo(s) enviados e verificados.",
+            return persistTerminal(
+                TransferExecutionResult(
+                    status = TransferExecutionStatus.Completed,
+                    route = activeRoute ?: desiredRoute,
+                    uploadedFiles = verifiedFiles,
+                    verifiedFiles = verifiedFiles,
+                    transferredBytes = completedBytes,
+                    fallbackReason = fallbackReason,
+                    message = "$verifiedFiles arquivo(s) enviados e verificados.",
+                ),
             )
         } catch (_: TransferCancelledSignal) {
             emit(
@@ -354,26 +390,34 @@ class EchoTransferRepository(
                 message = "Cancelando e fechando a sessão FTP.",
                 force = true,
             )
-            return cancelledResult()
+            return persistTerminal(cancelledResult())
         } catch (error: Throwable) {
             emit(
                 status = TransferExecutionStatus.Failed,
                 message = error.message ?: "Não foi possível iniciar a transferência.",
                 force = true,
             )
-            return TransferExecutionResult(
-                status = TransferExecutionStatus.Failed,
-                route = activeRoute ?: desiredRoute,
-                uploadedFiles = verifiedFiles,
-                verifiedFiles = verifiedFiles,
-                transferredBytes = completedBytes,
-                fallbackReason = fallbackReason,
-                failedFile = currentFile,
-                message = error.message ?: "Não foi possível iniciar a transferência.",
+            return persistTerminal(
+                TransferExecutionResult(
+                    status = TransferExecutionStatus.Failed,
+                    route = activeRoute ?: desiredRoute,
+                    uploadedFiles = verifiedFiles,
+                    verifiedFiles = verifiedFiles,
+                    transferredBytes = completedBytes,
+                    fallbackReason = fallbackReason,
+                    failedFile = currentFile,
+                    message = error.message ?: "Não foi possível iniciar a transferência.",
+                ),
             )
         } finally {
             closeCurrentSession()
         }
+    }
+
+    fun transferHistory(): List<TransferHistoryEntry> = historyStore.load()
+
+    fun clearTransferHistory() {
+        historyStore.clear()
     }
 
     fun openRemoteBrowser(requestedRoute: FtpRoute): RemoteFolderBrowser =
