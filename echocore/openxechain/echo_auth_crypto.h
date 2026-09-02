@@ -67,7 +67,7 @@ static inline int echo_auth_make_response_transcript(
 
     if (out == NULL || challenge == NULL || session_id == UINT64_C(0) ||
         counter == UINT64_C(0) ||
-        (requested_capabilities & ~ECHO_CAP_ALL) != UINT64_C(0)) {
+        (requested_capabilities & ~ECHO_AUTH_CAP_ALL) != UINT64_C(0)) {
         return -1;
     }
 
