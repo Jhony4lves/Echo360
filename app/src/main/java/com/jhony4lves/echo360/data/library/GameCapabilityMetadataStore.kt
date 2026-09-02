@@ -1,6 +1,7 @@
 package com.jhony4lves.echo360.data.library
 
 import android.content.Context
+import com.jhony4lves.echo360.domain.library.GameCapabilityCatalog
 import com.jhony4lves.echo360.domain.library.GameCapabilityMetadata
 import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.domain.library.KinectSupport
@@ -20,8 +21,10 @@ class GameCapabilityMetadataStore(context: Context) {
         .map(GameEntry::titleId)
         .distinct()
         .associateWith(::metadataForTitleId)
+        .also(GameCapabilityCatalog::replace)
 
     fun metadataFor(game: GameEntry): GameCapabilityMetadata = metadataForTitleId(game.titleId)
+        .also { metadata -> GameCapabilityCatalog.put(game.titleId, metadata) }
 
     fun save(game: GameEntry, metadata: GameCapabilityMetadata): GameCapabilityMetadata {
         val prefix = prefix(game.titleId)
@@ -45,6 +48,7 @@ class GameCapabilityMetadataStore(context: Context) {
             .remove("${prefix}localPlayers")
             .remove("${prefix}genre")
             .apply()
+        GameCapabilityCatalog.remove(game.titleId)
     }
 
     private fun metadataForTitleId(titleId: Long): GameCapabilityMetadata {
