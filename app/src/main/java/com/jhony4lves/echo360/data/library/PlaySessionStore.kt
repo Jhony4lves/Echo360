@@ -30,8 +30,9 @@ class PlaySessionStore(context: Context) {
         game: GameEntry,
         atEpochMs: Long = System.currentTimeMillis(),
     ): PlaySessionLedger {
+        val current = load()
         val next = engine.observe(
-            ledger = load(),
+            ledger = current,
             observation = PlayObservation(
                 stableKey = game.stableKey,
                 titleId = game.titleId,
@@ -40,7 +41,7 @@ class PlaySessionStore(context: Context) {
                 observedAtEpochMs = atEpochMs,
             ),
         )
-        persist(next)
+        if (next != current) persist(next)
         return next
     }
 
@@ -48,8 +49,9 @@ class PlaySessionStore(context: Context) {
     fun observeNonGame(
         atEpochMs: Long = System.currentTimeMillis(),
     ): PlaySessionLedger {
-        val next = engine.observeNonGame(load(), atEpochMs)
-        persist(next)
+        val current = load()
+        val next = engine.observeNonGame(current, atEpochMs)
+        if (next != current) persist(next)
         return next
     }
 
