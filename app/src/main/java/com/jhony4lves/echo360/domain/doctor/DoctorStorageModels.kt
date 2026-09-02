@@ -26,6 +26,7 @@ data class DoctorStorageMount(
     val observedName: String,
     val entries: List<DoctorStorageEntry>,
     val limitReached: Boolean,
+    val listingUnavailableDetail: String? = null,
 )
 
 data class DoctorStorageSnapshot(
