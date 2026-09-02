@@ -21,7 +21,7 @@ import com.jhony4lves.echo360.ui.doctor.EchoDoctorScreen
 import com.jhony4lves.echo360.ui.home.EchoPlayerHomeScreen
 import com.jhony4lves.echo360.ui.library.EchoPlayerLibraryScreen
 import com.jhony4lves.echo360.ui.stats.EchoStatsScreen
-import com.jhony4lves.echo360.ui.system.XboxSystemScreen
+import com.jhony4lves.echo360.ui.system.XboxHubScreen
 import com.jhony4lves.echo360.ui.theme.EchoColors
 import com.jhony4lves.echo360.ui.theme.EchoTheme
 import com.jhony4lves.echo360.ui.transfer.EchoFilesHubScreen
@@ -95,7 +95,7 @@ fun Echo360App() {
                         modifier = Modifier.padding(innerPadding),
                     )
 
-                    EchoDestination.System -> XboxSystemScreen(
+                    EchoDestination.System -> XboxHubScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
                 }
