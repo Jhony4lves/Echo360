@@ -8,6 +8,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.jhony4lves.echo360.data.library.AuroraLibraryRepository
+import com.jhony4lves.echo360.data.library.CurrentTitleRepository
 import com.jhony4lves.echo360.data.library.PlaySessionStore
 import com.jhony4lves.echo360.data.library.PlayerStateStore
 import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
@@ -22,7 +23,11 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 
 /**
- * Foreground-only NOVA sampler used to build conservative local playtime.
+ * Foreground-only runtime sampler used to build conservative local playtime.
+ *
+ * NOVA is the production current-title source today. The sampler depends only
+ * on Title ID + optional Media ID, so a promoted EchoCore CURRENT_TITLE source
+ * can replace/precede NOVA later without inventing richer metadata.
  *
  * A network/auth failure is treated as unknown and never closes a session.
  * Leaving STARTED closes at the last confirmed sample, so app-background time
@@ -34,6 +39,7 @@ internal fun EchoPlaytimeMonitor() {
     val appContext = LocalContext.current.applicationContext
     val lifecycleOwner = LocalLifecycleOwner.current
     val libraryRepository = remember(appContext) { AuroraLibraryRepository(appContext) }
+    val currentTitleRepository = remember(appContext) { CurrentTitleRepository(appContext) }
     val playerStore = remember(appContext) { PlayerStateStore(appContext) }
     val playSessionStore = remember(appContext) { PlaySessionStore(appContext) }
     val configStore = remember(appContext) { SecureXboxConfigStore(appContext) }
@@ -80,28 +86,28 @@ internal fun EchoPlaytimeMonitor() {
                         continue
                     }
 
-                    val nowPlaying = try {
-                        libraryRepository.nowPlaying()
+                    val observation = try {
+                        currentTitleRepository.observe()
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Throwable) {
                         null
                     }
 
-                    if (nowPlaying == null) {
-                        // Network/auth failure is unknown state, not evidence that play stopped.
+                    if (observation == null) {
+                        // Source failure is unknown state, not evidence that play stopped.
                         delay(OFFLINE_SAMPLE_MS)
                         continue
                     }
 
                     val observedAt = System.currentTimeMillis()
-                    val game = matchObservedGame(games, nowPlaying)
+                    val game = matchObservedGame(games, observation)
                     withContext(Dispatchers.IO) {
                         if (game != null) {
                             playSessionStore.observe(game, observedAt)
                             playerStore.markSeen(game, observedAt)
                         } else {
-                            // NOVA answered, but the active title is not one of the cached games.
+                            // Source answered, but the active title is not one of the cached games.
                             playSessionStore.observeNonGame(observedAt)
                         }
                     }

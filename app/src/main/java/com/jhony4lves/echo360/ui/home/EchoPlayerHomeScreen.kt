@@ -39,12 +39,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.data.library.AuroraLibraryRepository
+import com.jhony4lves.echo360.data.library.CurrentTitleRepository
 import com.jhony4lves.echo360.data.library.PlayerStateStore
 import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
+import com.jhony4lves.echo360.domain.library.CurrentTitleObservation
+import com.jhony4lves.echo360.domain.library.CurrentTitleOrigin
 import com.jhony4lves.echo360.domain.library.LibrarySnapshot
-import com.jhony4lves.echo360.domain.library.NowPlaying
 import com.jhony4lves.echo360.domain.library.PlayerGameState
 import com.jhony4lves.echo360.domain.library.buildHomeCollectionModel
+import com.jhony4lves.echo360.domain.library.matchObservedGame
 import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.components.EchoPanel
 import com.jhony4lves.echo360.ui.components.EchoStatusPill
@@ -61,22 +64,22 @@ fun EchoPlayerHomeScreen(
 ) {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { AuroraLibraryRepository(context) }
+    val currentTitleRepository = remember(context) { CurrentTitleRepository(context) }
     val playerStore = remember(context) { PlayerStateStore(context) }
     val configured = remember(context) { SecureXboxConfigStore(context).load() != null }
     val scope = rememberCoroutineScope()
 
     var snapshot by remember { mutableStateOf<LibrarySnapshot?>(null) }
-    var nowPlaying by remember { mutableStateOf<NowPlaying?>(null) }
+    var currentTitle by remember { mutableStateOf<CurrentTitleObservation?>(null) }
     var states by remember { mutableStateOf<Map<String, PlayerGameState>>(emptyMap()) }
 
     fun refreshLive() {
         if (!configured) return
         scope.launch {
-            nowPlaying = runCatching { repository.nowPlaying() }.getOrNull()
-            val live = nowPlaying
-            val game = snapshot?.games?.firstOrNull {
-                it.titleId == live?.titleId && (live?.mediaId == 0L || it.mediaId == live?.mediaId)
-            } ?: snapshot?.games?.firstOrNull { it.titleId == live?.titleId }
+            currentTitle = runCatching { currentTitleRepository.observe() }.getOrNull()
+            val game = currentTitle?.let { observation ->
+                matchObservedGame(snapshot?.games.orEmpty(), observation)
+            }
             if (game != null) {
                 playerStore.markSeen(game)
                 states = playerStore.snapshot(snapshot?.games.orEmpty())
@@ -91,10 +94,8 @@ fun EchoPlayerHomeScreen(
     }
 
     val games = snapshot?.games.orEmpty()
-    val liveGame = nowPlaying?.let { live ->
-        games.firstOrNull { it.titleId == live.titleId && (live.mediaId == 0L || it.mediaId == live.mediaId) }
-            ?: games.firstOrNull { it.titleId == live.titleId }
-    }
+    val liveGame = currentTitle?.let { matchObservedGame(games, it) }
+    val richDetails = currentTitle?.details
     val collection = buildHomeCollectionModel(
         games = games,
         states = states,
@@ -160,16 +161,16 @@ fun EchoPlayerHomeScreen(
                             EchoEyebrow("CONSOLE LINK")
                             EchoStatusPill(
                                 when {
-                                    nowPlaying != null -> "LIVE"
+                                    currentTitle != null -> "LIVE"
                                     configured -> "READY"
                                     else -> "SETUP"
                                 },
-                                nowPlaying != null,
+                                currentTitle != null,
                             )
                         }
                         Text(
                             when {
-                                nowPlaying != null -> "Xbox online na rede Echo."
+                                currentTitle != null -> "Xbox online na rede Echo."
                                 configured -> "Xbox configurado e pronto para conectar."
                                 else -> "Configure seu Xbox para liberar a rede Echo."
                             },
@@ -178,7 +179,7 @@ fun EchoPlayerHomeScreen(
                         )
                         Text(
                             if (configured) {
-                                "NOVA, Aurora FTP e FTPdll disponíveis pela camada nativa."
+                                "EchoCore, NOVA, Aurora FTP e FTPdll coexistem pela camada nativa."
                             } else {
                                 "IP, NOVA e FTP ficam protegidos pelo Android Keystore."
                             },
@@ -230,7 +231,7 @@ fun EchoPlayerHomeScreen(
                             color = EchoColors.Text,
                         )
                         Text(
-                            "O Echo360 usa a Library e a NOVA para transformar esta área na sua retomada rápida.",
+                            "O Echo360 usa a Library e uma fonte read-only de título atual para transformar esta área na sua retomada rápida.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = EchoColors.TextSecondary,
                         )
@@ -249,7 +250,11 @@ fun EchoPlayerHomeScreen(
                                 Spacer(Modifier.height(5.dp))
                                 Text(
                                     if (liveGame != null) {
-                                        "TU ${nowPlaying?.titleUpdateVersion ?: 0} // ${nowPlaying?.resolutionWidth ?: 0}×${nowPlaying?.resolutionHeight ?: 0}"
+                                        if (richDetails != null) {
+                                            "TU ${richDetails.titleUpdateVersion} // ${richDetails.resolutionWidth}×${richDetails.resolutionHeight}"
+                                        } else {
+                                            "TITLE ${currentTitle?.titleIdHex ?: "????????"} // ${currentTitleSourceLabel(currentTitle?.origin)}"
+                                        }
                                     } else {
                                         val state = states[continueGame.stableKey] ?: PlayerGameState()
                                         if (state.launchCount > 0) {
@@ -362,6 +367,12 @@ fun EchoPlayerHomeScreen(
             }
         }
     }
+}
+
+private fun currentTitleSourceLabel(origin: CurrentTitleOrigin?): String = when (origin) {
+    CurrentTitleOrigin.NovaCompatibility -> "NOVA"
+    CurrentTitleOrigin.EchoCore -> "ECHOCORE"
+    null -> "SOURCE"
 }
 
 @Composable
