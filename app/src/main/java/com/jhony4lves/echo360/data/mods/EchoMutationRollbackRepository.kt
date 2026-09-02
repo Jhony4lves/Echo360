@@ -53,21 +53,24 @@ class EchoMutationRollbackRepository(
                     ),
                 )
             }
-            val report = runCatching {
-                verifier.verify(snapshot, cancellationToken)
-            }.getOrElse { failure ->
+
+            val reportResult = runCatching { verifier.verify(snapshot, cancellationToken) }
+            if (reportResult.isFailure) {
+                val failure = reportResult.exceptionOrNull()
                 val blocked = EchoRollbackAssessment(
                     snapshotId = snapshot.manifest.id,
                     sourceRoot = snapshot.manifest.sourceRoot,
                     decision = RemoteMutationSafetyDecision(
                         approved = false,
                         code = RemoteMutationSafetyCode.RollbackSnapshotInvalid,
-                        detail = failure.message ?: "Não foi possível verificar o snapshot de rollback.",
+                        detail = failure?.message ?: "Não foi possível verificar o snapshot de rollback.",
                     ),
                 )
                 if (firstBlocked == null) firstBlocked = blocked
                 continue
             }
+
+            val report = reportResult.getOrThrow()
             val decision = RemoteMutationSafetyPolicy.evaluate(
                 targetCanonicalPath = target,
                 rollbackManifest = snapshot.manifest,
