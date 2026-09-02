@@ -1,0 +1,102 @@
+name: EchoCore Transfer Writer CI
+
+on:
+  push:
+    branches:
+      - echocore/transfer-writer-v1
+    paths:
+      - 'echocore/openxechain/echo_transfer_*'
+      - 'echocore/openxechain/echo_path.h'
+      - 'echocore/tests/**'
+      - '.github/workflows/echocore-transfer-writer-ci.yml'
+
+concurrency:
+  group: echocore-transfer-writer
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  host-and-abi:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Run existing EchoCore host tests
+        run: bash echocore/tests/run-host-tests.sh
+
+      - name: Create Xbox writer ABI stubs
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/echocore-writer-stubs/xecore
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_types.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_TYPES_H
+          #define ECHO_WRITER_TEST_TYPES_H
+          #include <stdint.h>
+          typedef int32_t NTSTATUS;
+          typedef void *HANDLE;
+          typedef struct _ANSI_STRING { uint16_t Length; uint16_t MaximumLength; char *Buffer; } ANSI_STRING;
+          typedef struct _OBJECT_ATTRIBUTES { HANDLE root_directory; ANSI_STRING *name_ptr; uint32_t attributes; } OBJECT_ATTRIBUTES;
+          typedef struct _IO_STATUS_BLOCK { union { NTSTATUS Status; void *Pointer; }; uint32_t Information; } IO_STATUS_BLOCK;
+          typedef void IO_APC_ROUTINE(void *context, IO_STATUS_BLOCK *status, uint32_t reserved);
+          typedef struct _FILE_NETWORK_OPEN_INFORMATION {
+            int64_t CreationTime; int64_t LastAccessTime; int64_t LastWriteTime; int64_t ChangeTime;
+            int64_t AllocationSize; int64_t EndOfFile; uint32_t FileAttributes; uint32_t pad;
+          } FILE_NETWORK_OPEN_INFORMATION;
+          typedef struct _CRYPT_SHA256_STATE { uint32_t words[40]; } CRYPT_SHA256_STATE;
+          #define STATUS_OBJECT_NAME_COLLISION ((NTSTATUS)0xC0000035u)
+          #define FILE_READ_DATA 0x0001u
+          #define FILE_WRITE_DATA 0x0002u
+          #define FILE_READ_ATTRIBUTES 0x0080u
+          #define DELETE 0x00010000u
+          #define SYNCHRONIZE 0x00100000u
+          #define FILE_ATTRIBUTE_NORMAL 0x00000080u
+          #define FILE_SHARE_READ 0x00000001u
+          #define FILE_OVERWRITE_IF 5u
+          #define FILE_OPEN 1u
+          #define FILE_NON_DIRECTORY_FILE 0x00000040u
+          #define FILE_SYNCHRONOUS_IO_NONALERT 0x00000020u
+          #define FileNetworkOpenInformation 34u
+          #define FileRenameInformation 10u
+          #define OBJ_CASE_INSENSITIVE 0x00000040u
+          #endif
+          EOF
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_io.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_IO_H
+          #define ECHO_WRITER_TEST_IO_H
+          #include "xboxkrnl_types.h"
+          NTSTATUS NtCreateFile(HANDLE *, uint32_t, OBJECT_ATTRIBUTES *, IO_STATUS_BLOCK *, uint32_t *, uint32_t, uint32_t, uint32_t, uint32_t);
+          NTSTATUS NtQueryInformationFile(HANDLE, IO_STATUS_BLOCK *, void *, uint32_t, uint32_t);
+          NTSTATUS NtReadFile(HANDLE, HANDLE, IO_APC_ROUTINE *, void *, IO_STATUS_BLOCK *, void *, uint32_t, int64_t *);
+          NTSTATUS NtWriteFile(HANDLE, HANDLE, IO_APC_ROUTINE *, void *, IO_STATUS_BLOCK *, void *, uint32_t, int64_t *);
+          NTSTATUS NtFlushBuffersFile(HANDLE, IO_STATUS_BLOCK *);
+          NTSTATUS NtSetInformationFile(HANDLE, IO_STATUS_BLOCK *, void *, uint32_t, uint32_t);
+          NTSTATUS NtClose(HANDLE);
+          #endif
+          EOF
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_rtl.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_RTL_H
+          #define ECHO_WRITER_TEST_RTL_H
+          #include "xboxkrnl_types.h"
+          void RtlInitAnsiString(ANSI_STRING *, const char *);
+          #endif
+          EOF
+          cat > /tmp/echocore-writer-stubs/xecore/xboxkrnl_crypto.h <<'EOF'
+          #ifndef ECHO_WRITER_TEST_CRYPTO_H
+          #define ECHO_WRITER_TEST_CRYPTO_H
+          #include "xboxkrnl_types.h"
+          void XeCryptSha256Init(CRYPT_SHA256_STATE *);
+          void XeCryptSha256Update(CRYPT_SHA256_STATE *, const uint8_t *, uint32_t);
+          void XeCryptSha256Final(CRYPT_SHA256_STATE *, uint8_t *, uint32_t);
+          #endif
+          EOF
+
+      - name: Syntax-check transactional writer
+        run: |
+          set -euxo pipefail
+          clang -std=c11 -Wall -Wextra -Werror -pedantic \
+            -I/tmp/echocore-writer-stubs \
+            -fsyntax-only echocore/openxechain/echo_transfer_writer_xbox.c
