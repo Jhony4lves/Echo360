@@ -9,6 +9,7 @@
 #include "echo_auth_crypto_xbox.h"
 #include "echo_pairing_record.h"
 #include "echo_pairing_store_xbox.h"
+#include "echo_pairing_token_xbox.h"
 #include "echo_transfer_writer_xbox.h"
 
 #define ECHO_PAIRING_NATIVE_DIR_1 "\\Device\\Harddisk0\\Partition1\\Echo360"
@@ -27,10 +28,18 @@
 #define ECHO_NTSTATUS_OBJECT_NAME_NOT_FOUND ((NTSTATUS)UINT32_C(0xC0000034))
 #define ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND ((NTSTATUS)UINT32_C(0xC000003A))
 
-static const uint8_t g_echo_pairing_domain[ECHO_PAIRING_DOMAIN_BYTES] = {
+static const uint8_t g_echo_pairing_domain_v1[ECHO_PAIRING_DOMAIN_BYTES] = {
     'E','C','H','O','3','6','0','-','P','A','I','R','I','N','G','-',
     'R','E','C','O','R','D','-','V','1'
 };
+
+static const uint8_t g_echo_pairing_domain_v2[ECHO_PAIRING_DOMAIN_BYTES] = {
+    'E','C','H','O','3','6','0','-','P','A','I','R','I','N','G','-',
+    'R','E','C','O','R','D','-','V','2'
+};
+
+static const uint8_t g_echo_pairing_token_domain[ECHO_PAIRING_TOKEN_KDF_DOMAIN_BYTES] =
+    ECHO_PAIRING_TOKEN_KDF_DOMAIN;
 
 static void echo_pairing_zero(void *memory, size_t length) {
     volatile uint8_t *bytes = (volatile uint8_t *)memory;
@@ -58,17 +67,32 @@ static int echo_pairing_status_is_missing(NTSTATUS status) {
            status == ECHO_NTSTATUS_OBJECT_PATH_NOT_FOUND;
 }
 
-static void echo_pairing_hash_prefix(
+static void echo_pairing_hash_prefix_with_domain(
+    const uint8_t domain[ECHO_PAIRING_DOMAIN_BYTES],
     const uint8_t prefix[ECHO_PAIRING_RECORD_PREFIX_BYTES],
     uint8_t digest[ECHO_PAIRING_DIGEST_BYTES]
 ) {
     CRYPT_SHA256_STATE state;
     echo_pairing_zero(&state, sizeof(state));
     XeCryptSha256Init(&state);
-    XeCryptSha256Update(&state, g_echo_pairing_domain, ECHO_PAIRING_DOMAIN_BYTES);
+    XeCryptSha256Update(&state, domain, ECHO_PAIRING_DOMAIN_BYTES);
     XeCryptSha256Update(&state, prefix, ECHO_PAIRING_RECORD_PREFIX_BYTES);
     XeCryptSha256Final(&state, digest, ECHO_PAIRING_DIGEST_BYTES);
     echo_pairing_zero(&state, sizeof(state));
+}
+
+static void echo_pairing_hash_prefix(
+    const uint8_t prefix[ECHO_PAIRING_RECORD_PREFIX_BYTES],
+    uint8_t digest[ECHO_PAIRING_DIGEST_BYTES]
+) {
+    echo_pairing_hash_prefix_with_domain(g_echo_pairing_domain_v1, prefix, digest);
+}
+
+static void echo_pairing_hash_token_prefix(
+    const uint8_t prefix[ECHO_PAIRING_RECORD_PREFIX_BYTES],
+    uint8_t digest[ECHO_PAIRING_DIGEST_BYTES]
+) {
+    echo_pairing_hash_prefix_with_domain(g_echo_pairing_domain_v2, prefix, digest);
 }
 
 static void echo_pairing_hash_record(
@@ -81,6 +105,31 @@ static void echo_pairing_hash_record(
     XeCryptSha256Update(&state, record, ECHO_PAIRING_RECORD_BYTES);
     XeCryptSha256Final(&state, digest, ECHO_PAIRING_DIGEST_BYTES);
     echo_pairing_zero(&state, sizeof(state));
+}
+
+static int echo_pairing_derive_secret_from_token(
+    const uint8_t token[ECHO_PAIRING_TOKEN_BYTES],
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES]
+) {
+    CRYPT_SHA256_STATE state;
+    if (token == NULL || secret == NULL || echo_pairing_token_is_zero(token)) {
+        if (secret != NULL) echo_pairing_zero(secret, ECHO_AUTH_SECRET_BYTES);
+        return -1;
+    }
+
+    echo_pairing_zero(secret, ECHO_AUTH_SECRET_BYTES);
+    echo_pairing_zero(&state, sizeof(state));
+    XeCryptSha256Init(&state);
+    XeCryptSha256Update(&state, g_echo_pairing_token_domain, ECHO_PAIRING_TOKEN_KDF_DOMAIN_BYTES);
+    XeCryptSha256Update(&state, token, ECHO_PAIRING_TOKEN_BYTES);
+    XeCryptSha256Final(&state, secret, ECHO_AUTH_SECRET_BYTES);
+    echo_pairing_zero(&state, sizeof(state));
+
+    if (echo_pairing_secret_is_zero(secret)) {
+        echo_pairing_zero(secret, ECHO_AUTH_SECRET_BYTES);
+        return -2;
+    }
+    return 0;
 }
 
 static int echo_pairing_create_directory(const char *native_path) {
@@ -113,24 +162,20 @@ static int echo_pairing_create_directory(const char *native_path) {
     return ECHO_PAIRING_STORE_OK;
 }
 
-int echo_pairing_xbox_load_secret(
-    uint8_t secret_out[ECHO_AUTH_SECRET_BYTES]
+static int echo_pairing_read_record(
+    uint8_t record[ECHO_PAIRING_RECORD_BYTES]
 ) {
     ANSI_STRING name;
     OBJECT_ATTRIBUTES attributes;
     IO_STATUS_BLOCK io_status;
     FILE_NETWORK_OPEN_INFORMATION info;
     HANDLE handle = (HANDLE)0;
-    uint8_t record[ECHO_PAIRING_RECORD_BYTES];
-    uint8_t calculated[ECHO_PAIRING_DIGEST_BYTES];
     int64_t offset = 0;
     NTSTATUS status;
     int result = ECHO_PAIRING_STORE_IO_ERROR;
 
-    if (secret_out == NULL) return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
-    echo_pairing_zero(secret_out, ECHO_AUTH_SECRET_BYTES);
-    echo_pairing_zero(record, sizeof(record));
-    echo_pairing_zero(calculated, sizeof(calculated));
+    if (record == NULL) return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    echo_pairing_zero(record, ECHO_PAIRING_RECORD_BYTES);
     echo_pairing_zero(&io_status, sizeof(io_status));
     echo_pairing_zero(&info, sizeof(info));
 
@@ -185,44 +230,141 @@ int echo_pairing_xbox_load_secret(
         goto cleanup;
     }
 
-    if (echo_pairing_record_validate_prefix(record) != 0) {
-        result = ECHO_PAIRING_STORE_CORRUPT;
-        goto cleanup;
-    }
-    echo_pairing_hash_prefix(record, calculated);
-    if (!echo_pairing_record_digest_equal(calculated, record + ECHO_PAIRING_RECORD_PREFIX_BYTES)) {
-        result = ECHO_PAIRING_STORE_CORRUPT;
-        goto cleanup;
-    }
-
-    echo_pairing_copy(secret_out, record + 8U, ECHO_AUTH_SECRET_BYTES);
     result = ECHO_PAIRING_STORE_OK;
 
 cleanup:
     (void)NtClose(handle);
-    echo_pairing_zero(record, sizeof(record));
+    if (result != ECHO_PAIRING_STORE_OK) echo_pairing_zero(record, ECHO_PAIRING_RECORD_BYTES);
+    return result;
+}
+
+static int echo_pairing_validate_record_digest(
+    const uint8_t record[ECHO_PAIRING_RECORD_BYTES],
+    uint8_t version
+) {
+    uint8_t calculated[ECHO_PAIRING_DIGEST_BYTES];
+    int valid;
+
     echo_pairing_zero(calculated, sizeof(calculated));
+    if (version == ECHO_PAIRING_RECORD_VERSION_SECRET) {
+        valid = echo_pairing_record_validate_prefix(record);
+        if (valid == 0) echo_pairing_hash_prefix(record, calculated);
+    } else if (version == ECHO_PAIRING_RECORD_VERSION_TOKEN) {
+        valid = echo_pairing_record_validate_token_prefix(record);
+        if (valid == 0) echo_pairing_hash_token_prefix(record, calculated);
+    } else {
+        return ECHO_PAIRING_STORE_CORRUPT;
+    }
+
+    if (valid != 0 || !echo_pairing_record_digest_equal(
+            calculated,
+            record + ECHO_PAIRING_RECORD_PREFIX_BYTES
+        )) {
+        echo_pairing_zero(calculated, sizeof(calculated));
+        return ECHO_PAIRING_STORE_CORRUPT;
+    }
+
+    echo_pairing_zero(calculated, sizeof(calculated));
+    return ECHO_PAIRING_STORE_OK;
+}
+
+int echo_pairing_xbox_load_secret(
+    uint8_t secret_out[ECHO_AUTH_SECRET_BYTES]
+) {
+    uint8_t record[ECHO_PAIRING_RECORD_BYTES];
+    uint8_t version;
+    int result;
+
+    if (secret_out == NULL) return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    echo_pairing_zero(secret_out, ECHO_AUTH_SECRET_BYTES);
+    echo_pairing_zero(record, sizeof(record));
+
+    result = echo_pairing_read_record(record);
+    if (result != ECHO_PAIRING_STORE_OK) goto cleanup;
+
+    version = record[5];
+    result = echo_pairing_validate_record_digest(record, version);
+    if (result != ECHO_PAIRING_STORE_OK) goto cleanup;
+
+    if (version == ECHO_PAIRING_RECORD_VERSION_SECRET) {
+        echo_pairing_copy(
+            secret_out,
+            record + ECHO_PAIRING_RECORD_PAYLOAD_OFFSET,
+            ECHO_AUTH_SECRET_BYTES
+        );
+    } else if (version == ECHO_PAIRING_RECORD_VERSION_TOKEN) {
+        if (echo_pairing_derive_secret_from_token(
+                record + ECHO_PAIRING_RECORD_PAYLOAD_OFFSET,
+                secret_out
+            ) != 0) {
+            result = ECHO_PAIRING_STORE_CORRUPT;
+            goto cleanup;
+        }
+    } else {
+        result = ECHO_PAIRING_STORE_CORRUPT;
+        goto cleanup;
+    }
+
+    result = ECHO_PAIRING_STORE_OK;
+
+cleanup:
+    echo_pairing_zero(record, sizeof(record));
     if (result != ECHO_PAIRING_STORE_OK) echo_pairing_zero(secret_out, ECHO_AUTH_SECRET_BYTES);
     return result;
 }
 
-int echo_pairing_xbox_store_secret(
-    const uint8_t secret[ECHO_AUTH_SECRET_BYTES]
+int echo_pairing_xbox_load_token(
+    uint8_t token_out[ECHO_PAIRING_TOKEN_BYTES]
+) {
+    uint8_t record[ECHO_PAIRING_RECORD_BYTES];
+    uint8_t version;
+    int result;
+
+    if (token_out == NULL) return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    echo_pairing_zero(token_out, ECHO_PAIRING_TOKEN_BYTES);
+    echo_pairing_zero(record, sizeof(record));
+
+    result = echo_pairing_read_record(record);
+    if (result != ECHO_PAIRING_STORE_OK) goto cleanup;
+
+    version = record[5];
+    result = echo_pairing_validate_record_digest(record, version);
+    if (result != ECHO_PAIRING_STORE_OK) goto cleanup;
+
+    if (version == ECHO_PAIRING_RECORD_VERSION_SECRET) {
+        result = ECHO_PAIRING_STORE_TOKEN_UNAVAILABLE;
+        goto cleanup;
+    }
+    if (version != ECHO_PAIRING_RECORD_VERSION_TOKEN) {
+        result = ECHO_PAIRING_STORE_CORRUPT;
+        goto cleanup;
+    }
+
+    echo_pairing_copy(
+        token_out,
+        record + ECHO_PAIRING_RECORD_PAYLOAD_OFFSET,
+        ECHO_PAIRING_TOKEN_BYTES
+    );
+    result = ECHO_PAIRING_STORE_OK;
+
+cleanup:
+    echo_pairing_zero(record, sizeof(record));
+    if (result != ECHO_PAIRING_STORE_OK) echo_pairing_zero(token_out, ECHO_PAIRING_TOKEN_BYTES);
+    return result;
+}
+
+static int echo_pairing_store_record(
+    const uint8_t record[ECHO_PAIRING_RECORD_BYTES],
+    uint32_t transfer_id
 ) {
     echo_transfer_writer writer;
-    uint8_t record[ECHO_PAIRING_RECORD_BYTES];
-    uint8_t record_digest[ECHO_PAIRING_DIGEST_BYTES];
     uint8_t file_digest[ECHO_PAIRING_DIGEST_BYTES];
-    uint32_t transfer_id;
     int writer_opened = 0;
     int result = ECHO_PAIRING_STORE_IO_ERROR;
 
-    if (secret == NULL || echo_pairing_secret_is_zero(secret)) {
-        return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
-    }
+    if (record == NULL) return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    if (transfer_id == 0U) transfer_id = ECHO_PAIRING_TRANSFER_ID_FALLBACK;
 
-    echo_pairing_zero(record, sizeof(record));
-    echo_pairing_zero(record_digest, sizeof(record_digest));
     echo_pairing_zero(file_digest, sizeof(file_digest));
     echo_transfer_writer_reset(&writer);
 
@@ -231,21 +373,7 @@ int echo_pairing_xbox_store_secret(
         goto cleanup;
     }
 
-    echo_pairing_record_make_prefix(record, secret);
-    echo_pairing_hash_prefix(record, record_digest);
-    echo_pairing_copy(
-        record + ECHO_PAIRING_RECORD_PREFIX_BYTES,
-        record_digest,
-        ECHO_PAIRING_DIGEST_BYTES
-    );
     echo_pairing_hash_record(record, file_digest);
-
-    transfer_id = ((uint32_t)secret[0] << 24U) |
-                  ((uint32_t)secret[1] << 16U) |
-                  ((uint32_t)secret[2] << 8U) |
-                  (uint32_t)secret[3];
-    if (transfer_id == 0U) transfer_id = ECHO_PAIRING_TRANSFER_ID_FALLBACK;
-
     if (echo_transfer_writer_open(
             &writer,
             transfer_id,
@@ -277,9 +405,73 @@ int echo_pairing_xbox_store_secret(
 
 cleanup:
     if (writer_opened) echo_transfer_writer_abort(&writer);
+    echo_pairing_zero(file_digest, sizeof(file_digest));
+    return result;
+}
+
+int echo_pairing_xbox_store_secret(
+    const uint8_t secret[ECHO_AUTH_SECRET_BYTES]
+) {
+    uint8_t record[ECHO_PAIRING_RECORD_BYTES];
+    uint8_t record_digest[ECHO_PAIRING_DIGEST_BYTES];
+    uint32_t transfer_id;
+    int result;
+
+    if (secret == NULL || echo_pairing_secret_is_zero(secret)) {
+        return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    }
+
     echo_pairing_zero(record, sizeof(record));
     echo_pairing_zero(record_digest, sizeof(record_digest));
-    echo_pairing_zero(file_digest, sizeof(file_digest));
+    echo_pairing_record_make_prefix(record, secret);
+    echo_pairing_hash_prefix(record, record_digest);
+    echo_pairing_copy(
+        record + ECHO_PAIRING_RECORD_PREFIX_BYTES,
+        record_digest,
+        ECHO_PAIRING_DIGEST_BYTES
+    );
+
+    transfer_id = ((uint32_t)secret[0] << 24U) |
+                  ((uint32_t)secret[1] << 16U) |
+                  ((uint32_t)secret[2] << 8U) |
+                  (uint32_t)secret[3];
+    result = echo_pairing_store_record(record, transfer_id);
+
+    echo_pairing_zero(record, sizeof(record));
+    echo_pairing_zero(record_digest, sizeof(record_digest));
+    return result;
+}
+
+int echo_pairing_xbox_store_token(
+    const uint8_t token[ECHO_PAIRING_TOKEN_BYTES]
+) {
+    uint8_t record[ECHO_PAIRING_RECORD_BYTES];
+    uint8_t record_digest[ECHO_PAIRING_DIGEST_BYTES];
+    uint32_t transfer_id;
+    int result;
+
+    if (token == NULL || echo_pairing_token_is_zero(token)) {
+        return ECHO_PAIRING_STORE_INVALID_ARGUMENT;
+    }
+
+    echo_pairing_zero(record, sizeof(record));
+    echo_pairing_zero(record_digest, sizeof(record_digest));
+    echo_pairing_record_make_token_prefix(record, token);
+    echo_pairing_hash_token_prefix(record, record_digest);
+    echo_pairing_copy(
+        record + ECHO_PAIRING_RECORD_PREFIX_BYTES,
+        record_digest,
+        ECHO_PAIRING_DIGEST_BYTES
+    );
+
+    transfer_id = ((uint32_t)token[0] << 24U) |
+                  ((uint32_t)token[1] << 16U) |
+                  ((uint32_t)token[2] << 8U) |
+                  (uint32_t)token[3];
+    result = echo_pairing_store_record(record, transfer_id);
+
+    echo_pairing_zero(record, sizeof(record));
+    echo_pairing_zero(record_digest, sizeof(record_digest));
     return result;
 }
 
