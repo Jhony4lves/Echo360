@@ -35,6 +35,7 @@ static char g_writer_path[128];
 static uint8_t g_writer_record[ECHO_PAIRING_RECORD_BYTES];
 static uint32_t g_writer_record_bytes;
 static uint8_t g_generated_secret[ECHO_AUTH_SECRET_BYTES];
+static uint8_t g_generated_token[ECHO_PAIRING_TOKEN_BYTES];
 
 static void fake_sha_init(CRYPT_SHA256_STATE *state) {
     memset(state, 0, sizeof(*state));
@@ -223,12 +224,22 @@ static void reset_fake(void) {
     g_writer_finalize_result = ECHO_WRITER_OK;
     g_writer_record_bytes = 0U;
     for (i = 0U; i < ECHO_AUTH_SECRET_BYTES; ++i) g_generated_secret[i] = (uint8_t)(0x40U + i);
+    for (i = 0U; i < ECHO_PAIRING_TOKEN_BYTES; ++i) g_generated_token[i] = (uint8_t)(0x10U + i);
 }
 
 static void make_valid_record(const uint8_t secret[ECHO_AUTH_SECRET_BYTES]) {
     uint8_t digest[ECHO_PAIRING_DIGEST_BYTES];
     echo_pairing_record_make_prefix(g_file, secret);
     echo_pairing_hash_prefix(g_file, digest);
+    memcpy(g_file + ECHO_PAIRING_RECORD_PREFIX_BYTES, digest, sizeof(digest));
+    g_file_size = ECHO_PAIRING_RECORD_BYTES;
+    g_file_exists = 1;
+}
+
+static void make_valid_token_record(const uint8_t token[ECHO_PAIRING_TOKEN_BYTES]) {
+    uint8_t digest[ECHO_PAIRING_DIGEST_BYTES];
+    echo_pairing_record_make_token_prefix(g_file, token);
+    echo_pairing_hash_token_prefix(g_file, digest);
     memcpy(g_file + ECHO_PAIRING_RECORD_PREFIX_BYTES, digest, sizeof(digest));
     g_file_size = ECHO_PAIRING_RECORD_BYTES;
     g_file_exists = 1;
@@ -265,6 +276,55 @@ static void test_missing_record_is_created_transactionally(void) {
     memset(output, 0, sizeof(output));
     assert(echo_pairing_xbox_load_secret(output) == ECHO_PAIRING_STORE_OK);
     assert(memcmp(output, g_generated_secret, sizeof(output)) == 0);
+}
+
+static void test_recoverable_token_round_trip(void) {
+    uint8_t token[ECHO_PAIRING_TOKEN_BYTES];
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
+    uint8_t expected_secret[ECHO_AUTH_SECRET_BYTES];
+
+    reset_fake();
+    assert(echo_pairing_xbox_store_token(g_generated_token) == ECHO_PAIRING_STORE_CREATED);
+    assert(g_file_exists == 1 && g_file_size == ECHO_PAIRING_RECORD_BYTES);
+    assert(g_file[5] == ECHO_PAIRING_RECORD_VERSION_TOKEN);
+    assert(g_directory_create_calls == 2U);
+    assert(g_writer_open_calls == 1U && g_writer_write_calls == 1U && g_writer_finalize_calls == 1U);
+
+    memset(token, 0, sizeof(token));
+    assert(echo_pairing_xbox_load_token(token) == ECHO_PAIRING_STORE_OK);
+    assert(memcmp(token, g_generated_token, sizeof(token)) == 0);
+
+    memset(secret, 0, sizeof(secret));
+    memset(expected_secret, 0, sizeof(expected_secret));
+    assert(echo_pairing_derive_secret_from_token(g_generated_token, expected_secret) == 0);
+    assert(echo_pairing_xbox_load_secret(secret) == ECHO_PAIRING_STORE_OK);
+    assert(memcmp(secret, expected_secret, sizeof(secret)) == 0);
+}
+
+static void test_legacy_record_reports_token_unavailable(void) {
+    uint8_t token[ECHO_PAIRING_TOKEN_BYTES];
+    reset_fake();
+    make_valid_record(g_generated_secret);
+    memset(token, 0xAA, sizeof(token));
+    assert(echo_pairing_xbox_load_token(token) == ECHO_PAIRING_STORE_TOKEN_UNAVAILABLE);
+    assert(bytes_all_zero(token, sizeof(token)));
+    assert(g_writer_open_calls == 0U);
+}
+
+static void test_token_record_corruption_fails_closed(void) {
+    uint8_t token[ECHO_PAIRING_TOKEN_BYTES];
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
+
+    reset_fake();
+    make_valid_token_record(g_generated_token);
+    g_file[ECHO_PAIRING_RECORD_TOKEN_RESERVED_OFFSET] = 1U;
+    memset(token, 0xAA, sizeof(token));
+    memset(secret, 0xAA, sizeof(secret));
+    assert(echo_pairing_xbox_load_token(token) == ECHO_PAIRING_STORE_CORRUPT);
+    assert(echo_pairing_xbox_load_secret(secret) == ECHO_PAIRING_STORE_CORRUPT);
+    assert(bytes_all_zero(token, sizeof(token)));
+    assert(bytes_all_zero(secret, sizeof(secret)));
+    assert(g_writer_open_calls == 0U);
 }
 
 static void test_corruption_never_autorepairs(void) {
@@ -340,20 +400,27 @@ static void test_writer_failure_never_returns_secret(void) {
     assert(g_file_exists == 0);
 }
 
-static void test_null_arguments_are_rejected(void) {
+static void test_null_and_zero_arguments_are_rejected(void) {
+    uint8_t zero_token[ECHO_PAIRING_TOKEN_BYTES] = {0};
     reset_fake();
     assert(echo_pairing_xbox_load_secret(NULL) == ECHO_PAIRING_STORE_INVALID_ARGUMENT);
+    assert(echo_pairing_xbox_load_token(NULL) == ECHO_PAIRING_STORE_INVALID_ARGUMENT);
+    assert(echo_pairing_xbox_store_token(NULL) == ECHO_PAIRING_STORE_INVALID_ARGUMENT);
+    assert(echo_pairing_xbox_store_token(zero_token) == ECHO_PAIRING_STORE_INVALID_ARGUMENT);
     assert(echo_pairing_xbox_ensure_secret(NULL) == ECHO_PAIRING_STORE_INVALID_ARGUMENT);
 }
 
 int main(void) {
     test_valid_record_loads_without_repair();
     test_missing_record_is_created_transactionally();
+    test_recoverable_token_round_trip();
+    test_legacy_record_reports_token_unavailable();
+    test_token_record_corruption_fails_closed();
     test_corruption_never_autorepairs();
     test_wrong_size_and_zero_secret_fail_closed();
     test_io_failures_do_not_create_new_identity();
     test_writer_failure_never_returns_secret();
-    test_null_arguments_are_rejected();
+    test_null_and_zero_arguments_are_rejected();
     puts("EchoCore persistent pairing store tests: OK");
     return 0;
 }
