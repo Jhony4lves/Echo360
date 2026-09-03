@@ -12,6 +12,7 @@
 #define ECHO_NOT_ALERTABLE 0U
 #define ECHO_PAIRING_DISPLAY_MS 30000U
 #define ECHO_PAIRING_SHORT_DISPLAY_MS 5000U
+#define ECHO_PAIRING_NOTIFY_REFRESH_MS 2000U
 #define ECHO_PAIRING_MESSAGE_CAPACITY 96U
 
 /* XAM export 656 retail ABI: type, user, priority, LPCWSTR, ULONGLONG. */
@@ -70,8 +71,7 @@ static int echo_pairing_xex_set_message(const char *prefix, const char *suffix) 
     return 0;
 }
 
-static void echo_pairing_xex_notify(const char *prefix, const char *suffix, uint32_t hold_ms) {
-    if (echo_pairing_xex_set_message(prefix, suffix) != 0) return;
+static void echo_pairing_xex_notify_once(void) {
     XNotifyQueueUI(
         ECHO_NOTIFY_CONSOLE_MESSAGE,
         ECHO_XUSER_INDEX_ANY,
@@ -79,7 +79,32 @@ static void echo_pairing_xex_notify(const char *prefix, const char *suffix, uint
         g_echo_pairing_message,
         UINT64_C(0)
     );
-    echo_pairing_xex_delay(hold_ms);
+}
+
+/*
+ * XNotifyQueueUI controls the toast lifetime independently of the calling
+ * thread. Holding the title alive for 30 seconds therefore does not keep one
+ * toast visible for 30 seconds on retail hardware. Refresh the same message at
+ * a conservative cadence so the human pairing token remains readable for the
+ * requested window without changing the token or pairing identity.
+ */
+static void echo_pairing_xex_notify(const char *prefix, const char *suffix, uint32_t hold_ms) {
+    uint32_t remaining;
+
+    if (echo_pairing_xex_set_message(prefix, suffix) != 0) return;
+
+    remaining = hold_ms;
+    while (remaining > 0U) {
+        uint32_t slice = remaining;
+        if (slice > ECHO_PAIRING_NOTIFY_REFRESH_MS) {
+            slice = ECHO_PAIRING_NOTIFY_REFRESH_MS;
+        }
+
+        echo_pairing_xex_notify_once();
+        echo_pairing_xex_delay(slice);
+        remaining -= slice;
+    }
+
     echo_pairing_xex_zero(g_echo_pairing_message, sizeof(g_echo_pairing_message));
 }
 
@@ -91,7 +116,7 @@ static void echo_pairing_xex_notify(const char *prefix, const char *suffix, uint
  *  2. generate a non-zero 128-bit token with XeCryptRandom;
  *  3. derive the 256-bit secret with SHA-256(domain || token);
  *  4. persist pairing.dat transactionally;
- *  5. show the human Base32 token locally on the Xbox for 30 seconds.
+ *  5. repeatedly show the same human Base32 token locally for 30 seconds.
  *
  * The resident plugin only loads pairing.dat. It never creates or repairs it.
  */
