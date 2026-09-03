@@ -35,6 +35,7 @@
 #define ECHO_XUSER_INDEX_ANY 0xFFU
 #define ECHO_XNOTIFY_SYSTEM UINT64_C(1)
 #define ECHO_NOTICE_CAPACITY 64U
+#define ECHO_HW2_DATA_ANCHOR UINT32_C(0x45434832) /* "ECH2" */
 
 extern int NetDll_XNetStartup(uint32_t caller, void *params);
 extern int NetDll_XNetCleanup(uint32_t caller, void *params);
@@ -71,6 +72,13 @@ extern void XNotifyQueueUI(
 );
 
 static uint16_t g_echo_notice[ECHO_NOTICE_CAPACITY];
+
+/*
+ * SynthXEX v0.0.5 has an offsetToRVA bug when the final PE section is pure BSS
+ * (rawSize == 0). Keep one initialized, referenced datum so .data has raw bytes
+ * on every HW2 build. Volatile prevents dead-stripping of the read below.
+ */
+static volatile uint32_t g_echo_hw2_data_anchor = ECHO_HW2_DATA_ANCHOR;
 
 /*
  * Volatile is intentional: this bootstrap links without libc. It prevents an
@@ -225,8 +233,8 @@ static uint32_t echo_accept_bounded(uint32_t server, uint8_t *peer_address) {
 
 /*
  * OpenXeChain's Xbox 360 linker selects /ENTRY:_start for title executables.
- * Returning is deliberate for this first hardware proof: the bootstrap serves
- * one request and then relinquishes control instead of becoming resident.
+ * Returning is deliberate for this hardware proof: the bootstrap serves one
+ * request and then relinquishes control instead of becoming resident.
  */
 void _start(void) {
     uint8_t wsa_data[0x200];
@@ -239,6 +247,9 @@ void _start(void) {
     uint32_t reuse_address = 1U;
     int xnet_started = 0;
     int wsa_started = 0;
+
+    /* Force the initialized .data anchor to remain part of the executable. */
+    if (g_echo_hw2_data_anchor != ECHO_HW2_DATA_ANCHOR) return;
 
     echo_zero(wsa_data, sizeof(wsa_data));
     echo_zero(listen_address, sizeof(listen_address));
@@ -285,17 +296,18 @@ void _start(void) {
         echo_notify_failure("EchoCore HW2: 5801 FAIL");
         goto cleanup;
     }
-    if (NetDll_setsockopt(
-            ECHO_CALLER_TITLE,
-            server,
-            ECHO_SOL_SOCKET,
-            ECHO_XNET_SO_BYPASS_ENCRYPTION,
-            &socket_true,
-            sizeof(socket_true)
-        ) != 0) {
-        echo_notify_failure("EchoCore HW2: 5802 FAIL");
-        goto cleanup;
-    }
+
+    /* Some public TCP homebrew uses 0x5802 in addition to 0x5801, while other
+     * proven implementations intentionally omit it. Treat it as best-effort so
+     * lack of support cannot prevent the known-required 0x5801 path working. */
+    (void)NetDll_setsockopt(
+        ECHO_CALLER_TITLE,
+        server,
+        ECHO_SOL_SOCKET,
+        ECHO_XNET_SO_BYPASS_ENCRYPTION,
+        &socket_true,
+        sizeof(socket_true)
+    );
 
     if (NetDll_setsockopt(
             ECHO_CALLER_TITLE,
