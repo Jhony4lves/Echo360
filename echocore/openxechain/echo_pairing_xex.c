@@ -7,19 +7,20 @@
 
 #define ECHO_NOTIFY_CONSOLE_MESSAGE 34U
 #define ECHO_XUSER_INDEX_ANY 0xFFU
-#define ECHO_XNOTIFY_SYSTEM UINT64_C(1)
+#define ECHO_NOTIFY_PRIORITY_DEFAULT 1U
 #define ECHO_KERNEL_MODE 0U
 #define ECHO_NOT_ALERTABLE 0U
 #define ECHO_PAIRING_DISPLAY_MS 30000U
 #define ECHO_PAIRING_SHORT_DISPLAY_MS 5000U
 #define ECHO_PAIRING_MESSAGE_CAPACITY 96U
 
+/* XAM export 656 retail ABI: type, user, priority, LPCWSTR, ULONGLONG. */
 extern void XNotifyQueueUI(
     uint32_t notification_type,
     uint32_t user_index,
-    uint64_t areas,
-    uint16_t *display_text,
-    void *context_data
+    uint32_t priority,
+    const uint16_t *display_text,
+    uint64_t parameter
 );
 extern int KeDelayExecutionThread(
     uint32_t processor_mode,
@@ -74,9 +75,9 @@ static void echo_pairing_xex_notify(const char *prefix, const char *suffix, uint
     XNotifyQueueUI(
         ECHO_NOTIFY_CONSOLE_MESSAGE,
         ECHO_XUSER_INDEX_ANY,
-        ECHO_XNOTIFY_SYSTEM,
+        ECHO_NOTIFY_PRIORITY_DEFAULT,
         g_echo_pairing_message,
-        NULL
+        UINT64_C(0)
     );
     echo_pairing_xex_delay(hold_ms);
     echo_pairing_xex_zero(g_echo_pairing_message, sizeof(g_echo_pairing_message));
