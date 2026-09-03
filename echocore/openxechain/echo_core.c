@@ -2,11 +2,13 @@
 #include <stdint.h>
 
 #include "echo_protocol.h"
+#include "echo_xnet_abi.h"
 
 /*
  * EchoCore Phase 1 hardware bootstrap.
  *
- * Intentionally tiny and fail-closed:
+ * Hardware-test v2 adds local XNotify checkpoints so a real console can tell us
+ * exactly how far startup got. It remains intentionally tiny and fail-closed:
  * - Xbox title caller only (1)
  * - one TCP listener on port 36000
  * - one client
@@ -14,10 +16,6 @@
  * - bounded 30 second connection window
  * - no heap, filesystem, launch, NAND or memory-control APIs
  * - always closes sockets and returns to the loader
- *
- * The networking prototypes below match the public XAM export ABI used by
- * xecorelib. The pinned OpenXeChain xecorelib revision supplies the import
- * stubs at link time.
  */
 
 #define ECHO_CALLER_TITLE 1U
@@ -33,6 +31,10 @@
 #define ECHO_ACCEPT_POLLS 300U
 #define ECHO_KERNEL_MODE 0U
 #define ECHO_NOT_ALERTABLE 0U
+#define ECHO_NOTIFY_CONSOLE_MESSAGE 34U
+#define ECHO_XUSER_INDEX_ANY 0xFFU
+#define ECHO_XNOTIFY_SYSTEM UINT64_C(1)
+#define ECHO_NOTICE_CAPACITY 64U
 
 extern int NetDll_XNetStartup(uint32_t caller, void *params);
 extern int NetDll_XNetCleanup(uint32_t caller, void *params);
@@ -60,6 +62,15 @@ extern uint32_t NetDll_accept(uint32_t caller, uint32_t socket_handle, void *add
 extern int NetDll_recv(uint32_t caller, uint32_t socket_handle, void *buffer, uint32_t length, uint32_t flags);
 extern int NetDll_send(uint32_t caller, uint32_t socket_handle, const void *buffer, uint32_t length, uint32_t flags);
 extern int KeDelayExecutionThread(uint32_t processor_mode, uint32_t alertable, int64_t *interval_ptr);
+extern void XNotifyQueueUI(
+    uint32_t notification_type,
+    uint32_t user_index,
+    uint64_t areas,
+    uint16_t *display_text,
+    void *context_data
+);
+
+static uint16_t g_echo_notice[ECHO_NOTICE_CAPACITY];
 
 /*
  * Volatile is intentional: this bootstrap links without libc. It prevents an
@@ -79,6 +90,29 @@ static void echo_delay_ms(uint32_t milliseconds) {
     (void)KeDelayExecutionThread(ECHO_KERNEL_MODE, ECHO_NOT_ALERTABLE, &interval);
 }
 
+static void echo_notify_ascii(const char *text) {
+    uint32_t i = 0U;
+    if (text == NULL) return;
+    echo_zero(g_echo_notice, sizeof(g_echo_notice));
+    while (text[i] != '\0' && i + 1U < ECHO_NOTICE_CAPACITY) {
+        g_echo_notice[i] = (uint16_t)(uint8_t)text[i];
+        ++i;
+    }
+    g_echo_notice[i] = 0U;
+    XNotifyQueueUI(
+        ECHO_NOTIFY_CONSOLE_MESSAGE,
+        ECHO_XUSER_INDEX_ANY,
+        ECHO_XNOTIFY_SYSTEM,
+        g_echo_notice,
+        NULL
+    );
+}
+
+static void echo_notify_failure(const char *text) {
+    echo_notify_ascii(text);
+    echo_delay_ms(3000U);
+}
+
 static int echo_recv_exact(uint32_t socket_handle, void *buffer, uint32_t length) {
     uint8_t *cursor = (uint8_t *)buffer;
     uint32_t total = 0U;
@@ -91,7 +125,7 @@ static int echo_recv_exact(uint32_t socket_handle, void *buffer, uint32_t length
             length - total,
             0U
         );
-        if (received <= 0) {
+        if (received <= 0 || (uint32_t)received > length - total) {
             return -1;
         }
         total += (uint32_t)received;
@@ -111,7 +145,7 @@ static int echo_send_exact(uint32_t socket_handle, const void *buffer, uint32_t 
             length - total,
             0U
         );
-        if (sent <= 0) {
+        if (sent <= 0 || (uint32_t)sent > length - total) {
             return -1;
         }
         total += (uint32_t)sent;
@@ -198,8 +232,10 @@ void _start(void) {
     uint8_t wsa_data[0x200];
     uint8_t listen_address[16];
     uint8_t peer_address[16];
+    echo_xnet_startup_params xnet_params;
     uint32_t server = ECHO_INVALID_SOCKET;
     uint32_t client = ECHO_INVALID_SOCKET;
+    uint32_t socket_true = 1U;
     uint32_t reuse_address = 1U;
     int xnet_started = 0;
     int wsa_started = 0;
@@ -207,6 +243,9 @@ void _start(void) {
     echo_zero(wsa_data, sizeof(wsa_data));
     echo_zero(listen_address, sizeof(listen_address));
     echo_zero(peer_address, sizeof(peer_address));
+    echo_xnet_prepare_startup(&xnet_params);
+
+    echo_notify_ascii("EchoCore HW2: start");
 
     /* sockaddr_in in Xbox guest memory: family, port, address, padding. */
     listen_address[0] = 0x00U;
@@ -215,18 +254,46 @@ void _start(void) {
     listen_address[3] = ECHO_PORT_LOW;
     /* bytes 4..7 remain 0 => INADDR_ANY, bytes 8..15 are padding. */
 
-    if (NetDll_XNetStartup(ECHO_CALLER_TITLE, NULL) != 0) {
+    if (NetDll_XNetStartup(ECHO_CALLER_TITLE, &xnet_params) != 0) {
+        echo_notify_failure("EchoCore HW2: XNet FAIL");
         goto cleanup;
     }
     xnet_started = 1;
 
     if (NetDll_WSAStartup(ECHO_CALLER_TITLE, 0x0202U, wsa_data) != 0) {
+        echo_notify_failure("EchoCore HW2: WSA FAIL");
         goto cleanup;
     }
     wsa_started = 1;
 
     server = NetDll_socket(ECHO_CALLER_TITLE, ECHO_AF_INET, ECHO_SOCK_STREAM, 0U);
     if (server == ECHO_INVALID_SOCKET) {
+        echo_notify_failure("EchoCore HW2: socket FAIL");
+        goto cleanup;
+    }
+
+    /* RGH/JTAG homebrew must explicitly opt the title socket into ordinary
+     * unencrypted LAN traffic so a phone/PC can connect without XNet crypto. */
+    if (NetDll_setsockopt(
+            ECHO_CALLER_TITLE,
+            server,
+            ECHO_SOL_SOCKET,
+            ECHO_XNET_SO_INSECURE,
+            &socket_true,
+            sizeof(socket_true)
+        ) != 0) {
+        echo_notify_failure("EchoCore HW2: 5801 FAIL");
+        goto cleanup;
+    }
+    if (NetDll_setsockopt(
+            ECHO_CALLER_TITLE,
+            server,
+            ECHO_SOL_SOCKET,
+            ECHO_XNET_SO_BYPASS_ENCRYPTION,
+            &socket_true,
+            sizeof(socket_true)
+        ) != 0) {
+        echo_notify_failure("EchoCore HW2: 5802 FAIL");
         goto cleanup;
     }
 
@@ -238,22 +305,32 @@ void _start(void) {
             &reuse_address,
             sizeof(reuse_address)
         ) != 0) {
+        echo_notify_failure("EchoCore HW2: reuse FAIL");
         goto cleanup;
     }
 
     if (NetDll_bind(ECHO_CALLER_TITLE, server, listen_address, sizeof(listen_address)) != 0) {
+        echo_notify_failure("EchoCore HW2: bind FAIL");
         goto cleanup;
     }
     if (NetDll_listen(ECHO_CALLER_TITLE, server, 1) != 0) {
+        echo_notify_failure("EchoCore HW2: listen FAIL");
         goto cleanup;
     }
 
+    echo_notify_ascii("EchoCore HW2: LISTEN 36000");
     client = echo_accept_bounded(server, peer_address);
     if (client == ECHO_INVALID_SOCKET) {
+        echo_notify_failure("EchoCore HW2: PING timeout");
         goto cleanup;
     }
 
-    (void)echo_handle_ping(client);
+    if (echo_handle_ping(client) == 0) {
+        echo_notify_ascii("EchoCore HW2: PONG OK");
+        echo_delay_ms(2000U);
+    } else {
+        echo_notify_failure("EchoCore HW2: PING FAIL");
+    }
 
 cleanup:
     if (client != ECHO_INVALID_SOCKET) {
@@ -266,6 +343,8 @@ cleanup:
         (void)NetDll_WSACleanup(ECHO_CALLER_TITLE);
     }
     if (xnet_started) {
-        (void)NetDll_XNetCleanup(ECHO_CALLER_TITLE, NULL);
+        (void)NetDll_XNetCleanup(ECHO_CALLER_TITLE, &xnet_params);
     }
+    echo_zero(&xnet_params, sizeof(xnet_params));
+    echo_zero(g_echo_notice, sizeof(g_echo_notice));
 }
