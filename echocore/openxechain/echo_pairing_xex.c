@@ -108,20 +108,32 @@ static void echo_pairing_xex_notify(const char *prefix, const char *suffix, uint
     echo_pairing_xex_zero(g_echo_pairing_message, sizeof(g_echo_pairing_message));
 }
 
+static int echo_pairing_xex_format_token(
+    const uint8_t token[ECHO_PAIRING_TOKEN_BYTES],
+    char display[ECHO_PAIRING_TOKEN_DISPLAY_CAPACITY]
+) {
+    echo_pairing_xex_zero(display, ECHO_PAIRING_TOKEN_DISPLAY_CAPACITY);
+    return echo_pairing_token_format_display(token, display);
+}
+
 /*
  * Physical pairing bootstrap. It never opens a network socket.
  *
- * First launch only:
+ * First launch on record v2:
  *  1. verify pairing.dat is genuinely absent;
  *  2. generate a non-zero 128-bit token with XeCryptRandom;
- *  3. derive the 256-bit secret with SHA-256(domain || token);
- *  4. persist pairing.dat transactionally;
- *  5. repeatedly show the same human Base32 token locally for 30 seconds.
+ *  3. derive the 256-bit secret once as a KDF sanity check;
+ *  4. persist the token transactionally in pairing.dat v2;
+ *  5. repeatedly show the human Base32 token locally for 30 seconds.
+ *
+ * Later launches load and validate the v2 token and re-display the exact same
+ * code. A valid legacy v1 secret remains accepted by the resident service but
+ * cannot be reversed into its original physical token, so this tool refuses to
+ * rewrite it automatically.
  *
  * The resident plugin only loads pairing.dat. It never creates or repairs it.
  */
 void _start(void) {
-    uint8_t existing_secret[ECHO_AUTH_SECRET_BYTES];
     uint8_t token[ECHO_PAIRING_TOKEN_BYTES];
     uint8_t secret[ECHO_AUTH_SECRET_BYTES];
     char display[ECHO_PAIRING_TOKEN_DISPLAY_CAPACITY];
@@ -132,15 +144,30 @@ void _start(void) {
     synthxex_anchor = g_echo_synthxex_data_anchor;
     (void)synthxex_anchor;
 
-    echo_pairing_xex_zero(existing_secret, sizeof(existing_secret));
     echo_pairing_xex_zero(token, sizeof(token));
     echo_pairing_xex_zero(secret, sizeof(secret));
     echo_pairing_xex_zero(display, sizeof(display));
 
-    load_result = echo_pairing_xbox_load_secret(existing_secret);
+    load_result = echo_pairing_xbox_load_token(token);
     if (load_result == ECHO_PAIRING_STORE_OK) {
+        if (echo_pairing_xex_format_token(token, display) != 0) {
+            echo_pairing_xex_notify(
+                "Echo360: pairing code is invalid.",
+                NULL,
+                ECHO_PAIRING_SHORT_DISPLAY_MS
+            );
+            goto cleanup;
+        }
         echo_pairing_xex_notify(
-            "Echo360: pairing already exists. No changes made.",
+            "Echo360 Pair: ",
+            display,
+            ECHO_PAIRING_DISPLAY_MS
+        );
+        goto cleanup;
+    }
+    if (load_result == ECHO_PAIRING_STORE_TOKEN_UNAVAILABLE) {
+        echo_pairing_xex_notify(
+            "Echo360: legacy pairing exists. Code cannot be re-shown.",
             NULL,
             ECHO_PAIRING_SHORT_DISPLAY_MS
         );
@@ -157,7 +184,7 @@ void _start(void) {
 
     if (echo_pairing_token_xbox_generate(token) != 0 ||
         echo_pairing_token_xbox_derive_secret(token, secret) != 0 ||
-        echo_pairing_token_format_display(token, display) != 0) {
+        echo_pairing_xex_format_token(token, display) != 0) {
         echo_pairing_xex_notify(
             "Echo360: failed to generate pairing identity.",
             NULL,
@@ -166,7 +193,7 @@ void _start(void) {
         goto cleanup;
     }
 
-    store_result = echo_pairing_xbox_store_secret(secret);
+    store_result = echo_pairing_xbox_store_token(token);
     if (store_result != ECHO_PAIRING_STORE_CREATED) {
         echo_pairing_xex_notify(
             "Echo360: failed to persist pairing identity.",
@@ -183,7 +210,6 @@ void _start(void) {
     );
 
 cleanup:
-    echo_pairing_xex_zero(existing_secret, sizeof(existing_secret));
     echo_pairing_xex_zero(token, sizeof(token));
     echo_pairing_xex_zero(secret, sizeof(secret));
     echo_pairing_xex_zero(display, sizeof(display));
