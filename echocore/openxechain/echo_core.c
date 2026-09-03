@@ -7,7 +7,7 @@
 /*
  * EchoCore Phase 1 hardware bootstrap.
  *
- * Hardware-test v2 adds local XNotify checkpoints so a real console can tell us
+ * Hardware-test v3 adds local XNotify checkpoints so a real console can tell us
  * exactly how far startup got. It remains intentionally tiny and fail-closed:
  * - Xbox title caller only (1)
  * - one TCP listener on port 36000
@@ -33,9 +33,9 @@
 #define ECHO_NOT_ALERTABLE 0U
 #define ECHO_NOTIFY_CONSOLE_MESSAGE 34U
 #define ECHO_XUSER_INDEX_ANY 0xFFU
-#define ECHO_XNOTIFY_SYSTEM UINT64_C(1)
+#define ECHO_NOTIFY_PRIORITY_DEFAULT 1U
 #define ECHO_NOTICE_CAPACITY 64U
-#define ECHO_HW2_DATA_ANCHOR UINT32_C(0x45434832) /* "ECH2" */
+#define ECHO_HW3_DATA_ANCHOR UINT32_C(0x45434833) /* "ECH3" */
 
 extern int NetDll_XNetStartup(uint32_t caller, void *params);
 extern int NetDll_XNetCleanup(uint32_t caller, void *params);
@@ -63,12 +63,20 @@ extern uint32_t NetDll_accept(uint32_t caller, uint32_t socket_handle, void *add
 extern int NetDll_recv(uint32_t caller, uint32_t socket_handle, void *buffer, uint32_t length, uint32_t flags);
 extern int NetDll_send(uint32_t caller, uint32_t socket_handle, const void *buffer, uint32_t length, uint32_t flags);
 extern int KeDelayExecutionThread(uint32_t processor_mode, uint32_t alertable, int64_t *interval_ptr);
+
+/*
+ * XAM export 656 on retail Xbox 360:
+ *   XNotifyQueueUI(type, userIndex, priority, LPCWSTR text, ULONGLONG param)
+ * Keep this local audited ABI explicit. The previous HW2 prototype modeled the
+ * third parameter as a 64-bit area mask, shifting the following arguments on
+ * PowerPC and causing Fatal Crash / garbage notifications on real hardware.
+ */
 extern void XNotifyQueueUI(
     uint32_t notification_type,
     uint32_t user_index,
-    uint64_t areas,
-    uint16_t *display_text,
-    void *context_data
+    uint32_t priority,
+    const uint16_t *display_text,
+    uint64_t parameter
 );
 
 static uint16_t g_echo_notice[ECHO_NOTICE_CAPACITY];
@@ -76,9 +84,9 @@ static uint16_t g_echo_notice[ECHO_NOTICE_CAPACITY];
 /*
  * SynthXEX v0.0.5 has an offsetToRVA bug when the final PE section is pure BSS
  * (rawSize == 0). Keep one initialized, referenced datum so .data has raw bytes
- * on every HW2 build. Volatile prevents dead-stripping of the read below.
+ * on every HW3 build. Volatile prevents dead-stripping of the read below.
  */
-static volatile uint32_t g_echo_hw2_data_anchor = ECHO_HW2_DATA_ANCHOR;
+static volatile uint32_t g_echo_hw3_data_anchor = ECHO_HW3_DATA_ANCHOR;
 
 /*
  * Volatile is intentional: this bootstrap links without libc. It prevents an
@@ -110,9 +118,9 @@ static void echo_notify_ascii(const char *text) {
     XNotifyQueueUI(
         ECHO_NOTIFY_CONSOLE_MESSAGE,
         ECHO_XUSER_INDEX_ANY,
-        ECHO_XNOTIFY_SYSTEM,
+        ECHO_NOTIFY_PRIORITY_DEFAULT,
         g_echo_notice,
-        NULL
+        UINT64_C(0)
     );
 }
 
@@ -249,14 +257,14 @@ void _start(void) {
     int wsa_started = 0;
 
     /* Force the initialized .data anchor to remain part of the executable. */
-    if (g_echo_hw2_data_anchor != ECHO_HW2_DATA_ANCHOR) return;
+    if (g_echo_hw3_data_anchor != ECHO_HW3_DATA_ANCHOR) return;
 
     echo_zero(wsa_data, sizeof(wsa_data));
     echo_zero(listen_address, sizeof(listen_address));
     echo_zero(peer_address, sizeof(peer_address));
     echo_xnet_prepare_startup(&xnet_params);
 
-    echo_notify_ascii("EchoCore HW2: start");
+    echo_notify_ascii("EchoCore HW3: start");
 
     /* sockaddr_in in Xbox guest memory: family, port, address, padding. */
     listen_address[0] = 0x00U;
@@ -266,20 +274,20 @@ void _start(void) {
     /* bytes 4..7 remain 0 => INADDR_ANY, bytes 8..15 are padding. */
 
     if (NetDll_XNetStartup(ECHO_CALLER_TITLE, &xnet_params) != 0) {
-        echo_notify_failure("EchoCore HW2: XNet FAIL");
+        echo_notify_failure("EchoCore HW3: XNet FAIL");
         goto cleanup;
     }
     xnet_started = 1;
 
     if (NetDll_WSAStartup(ECHO_CALLER_TITLE, 0x0202U, wsa_data) != 0) {
-        echo_notify_failure("EchoCore HW2: WSA FAIL");
+        echo_notify_failure("EchoCore HW3: WSA FAIL");
         goto cleanup;
     }
     wsa_started = 1;
 
     server = NetDll_socket(ECHO_CALLER_TITLE, ECHO_AF_INET, ECHO_SOCK_STREAM, 0U);
     if (server == ECHO_INVALID_SOCKET) {
-        echo_notify_failure("EchoCore HW2: socket FAIL");
+        echo_notify_failure("EchoCore HW3: socket FAIL");
         goto cleanup;
     }
 
@@ -293,7 +301,7 @@ void _start(void) {
             &socket_true,
             sizeof(socket_true)
         ) != 0) {
-        echo_notify_failure("EchoCore HW2: 5801 FAIL");
+        echo_notify_failure("EchoCore HW3: 5801 FAIL");
         goto cleanup;
     }
 
@@ -317,31 +325,31 @@ void _start(void) {
             &reuse_address,
             sizeof(reuse_address)
         ) != 0) {
-        echo_notify_failure("EchoCore HW2: reuse FAIL");
+        echo_notify_failure("EchoCore HW3: reuse FAIL");
         goto cleanup;
     }
 
     if (NetDll_bind(ECHO_CALLER_TITLE, server, listen_address, sizeof(listen_address)) != 0) {
-        echo_notify_failure("EchoCore HW2: bind FAIL");
+        echo_notify_failure("EchoCore HW3: bind FAIL");
         goto cleanup;
     }
     if (NetDll_listen(ECHO_CALLER_TITLE, server, 1) != 0) {
-        echo_notify_failure("EchoCore HW2: listen FAIL");
+        echo_notify_failure("EchoCore HW3: listen FAIL");
         goto cleanup;
     }
 
-    echo_notify_ascii("EchoCore HW2: LISTEN 36000");
+    echo_notify_ascii("EchoCore HW3: LISTEN 36000");
     client = echo_accept_bounded(server, peer_address);
     if (client == ECHO_INVALID_SOCKET) {
-        echo_notify_failure("EchoCore HW2: PING timeout");
+        echo_notify_failure("EchoCore HW3: PING timeout");
         goto cleanup;
     }
 
     if (echo_handle_ping(client) == 0) {
-        echo_notify_ascii("EchoCore HW2: PONG OK");
+        echo_notify_ascii("EchoCore HW3: PONG OK");
         echo_delay_ms(2000U);
     } else {
-        echo_notify_failure("EchoCore HW2: PING FAIL");
+        echo_notify_failure("EchoCore HW3: PING FAIL");
     }
 
 cleanup:
