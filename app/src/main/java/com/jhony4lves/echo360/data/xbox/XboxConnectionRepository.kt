@@ -5,7 +5,9 @@ import com.jhony4lves.echo360.domain.xbox.TransportStatus
 import com.jhony4lves.echo360.domain.xbox.XboxConnectionSnapshot
 import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.domain.xbox.XboxTransport
+import com.jhony4lves.echo360.network.echolink.EchoLinkAuthenticationException
 import com.jhony4lves.echo360.network.echolink.EchoLinkClient
+import com.jhony4lves.echo360.network.echolink.EchoLinkPairingTokenException
 import com.jhony4lves.echo360.network.echolink.EchoLinkProtocolException
 import com.jhony4lves.echo360.network.ftp.FtpProtocolException
 import com.jhony4lves.echo360.network.ftp.FtpRoute
@@ -30,6 +32,7 @@ class XboxConnectionRepository(
         val echoCore = echoCoreHealth(
             host = endpoint.host,
             port = endpoint.echoLinkPort,
+            pairingToken = profile.credentials.echoCorePairingToken,
         )
 
         val novaResult = novaClient.probe(endpoint)
@@ -67,50 +70,95 @@ class XboxConnectionRepository(
         )
     }
 
-    private suspend fun echoCoreHealth(host: String, port: Int): TransportHealth {
+    private suspend fun echoCoreHealth(
+        host: String,
+        port: Int,
+        pairingToken: String,
+    ): TransportHealth {
         val startedAt = System.currentTimeMillis()
+
+        if (pairingToken.isBlank()) {
+            return try {
+                val pong = echoLinkClient.ping(host, port)
+                TransportHealth(
+                    transport = XboxTransport.EchoCore,
+                    status = TransportStatus.NotConfigured,
+                    detail = "EchoCore respondeu PONG v${pong.protocolVersion}, mas falta informar o token de pareamento para autenticar a sessão.",
+                    latencyMs = pong.latencyMs,
+                )
+            } catch (error: Throwable) {
+                echoCoreFailure(
+                    port = port,
+                    error = error,
+                    elapsedMs = System.currentTimeMillis() - startedAt,
+                )
+            }
+        }
+
         return try {
-            val pong = echoLinkClient.ping(host, port)
+            val auth = echoLinkClient.authenticate(
+                host = host,
+                pairingToken = pairingToken,
+                port = port,
+            )
             TransportHealth(
                 transport = XboxTransport.EchoCore,
                 status = TransportStatus.Connected,
-                detail = "EchoCore confirmou PONG v${pong.protocolVersion} com requestId e nonce válidos. Bootstrap read-only; pairing/CAPS ainda não foram executados.",
-                latencyMs = pong.latencyMs,
+                detail = "EchoCore autenticado via pairing + challenge/HMAC v${auth.protocolVersion}; sessão read-only autorizada.",
+                latencyMs = auth.latencyMs,
             )
         } catch (error: Throwable) {
-            val elapsed = System.currentTimeMillis() - startedAt
-            val status = when (error) {
-                is EchoLinkProtocolException, is EOFException -> TransportStatus.ProtocolError
-                is ConnectException, is SocketTimeoutException -> TransportStatus.Unreachable
-                is IOException -> TransportStatus.Unreachable
-                else -> TransportStatus.ProtocolError
-            }
-            val detail = when (error) {
-                is EchoLinkProtocolException ->
-                    "A porta $port respondeu, mas não completou um PING/PONG EchoLink v1 válido: ${safeError(error)}"
-
-                is EOFException ->
-                    "A porta $port aceitou a conexão e fechou antes do PONG EchoLink."
-
-                is ConnectException ->
-                    "EchoCore não está escutando na porta $port. Isso é esperado enquanto o XEX/plugin não estiver ativo."
-
-                is SocketTimeoutException ->
-                    "EchoCore não completou o PING/PONG na porta $port dentro do timeout. • $elapsed ms"
-
-                is IOException ->
-                    "Falha de rede ao validar EchoCore na porta $port: ${safeError(error)}"
-
-                else ->
-                    "Falha ao validar EchoCore na porta $port: ${safeError(error)}"
-            }
-            TransportHealth(
-                transport = XboxTransport.EchoCore,
-                status = status,
-                detail = detail,
-                latencyMs = elapsed,
+            echoCoreFailure(
+                port = port,
+                error = error,
+                elapsedMs = System.currentTimeMillis() - startedAt,
             )
         }
+    }
+
+    private fun echoCoreFailure(
+        port: Int,
+        error: Throwable,
+        elapsedMs: Long,
+    ): TransportHealth {
+        val status = when (error) {
+            is EchoLinkAuthenticationException, is EchoLinkPairingTokenException -> TransportStatus.AuthFailed
+            is EchoLinkProtocolException, is EOFException -> TransportStatus.ProtocolError
+            is ConnectException, is SocketTimeoutException -> TransportStatus.Unreachable
+            is IOException -> TransportStatus.Unreachable
+            else -> TransportStatus.ProtocolError
+        }
+        val detail = when (error) {
+            is EchoLinkPairingTokenException ->
+                "Token EchoCore inválido no app: ${safeError(error)}"
+
+            is EchoLinkAuthenticationException ->
+                "EchoCore recusou o pareamento. Confira se o token salvo no app é o mesmo exibido pelo Pairing XEX."
+
+            is EchoLinkProtocolException ->
+                "A porta $port respondeu, mas não concluiu um handshake EchoLink v1 válido: ${safeError(error)}"
+
+            is EOFException ->
+                "A porta $port aceitou a conexão e fechou antes de concluir o handshake EchoLink."
+
+            is ConnectException ->
+                "EchoCore não está escutando na porta $port. Ative o XEX/plugin resident e teste novamente."
+
+            is SocketTimeoutException ->
+                "EchoCore não concluiu o handshake na porta $port dentro do timeout. • $elapsedMs ms"
+
+            is IOException ->
+                "Falha de rede ao validar EchoCore na porta $port: ${safeError(error)}"
+
+            else ->
+                "Falha ao validar EchoCore na porta $port: ${safeError(error)}"
+        }
+        return TransportHealth(
+            transport = XboxTransport.EchoCore,
+            status = status,
+            detail = detail,
+            latencyMs = elapsedMs,
+        )
     }
 
     private suspend fun ftpHealth(

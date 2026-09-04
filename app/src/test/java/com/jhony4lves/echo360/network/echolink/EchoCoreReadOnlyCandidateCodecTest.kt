@@ -193,9 +193,9 @@ class EchoCoreReadOnlyCandidateCodecTest {
     }
 
     @Test
-    fun `stable EchoLink frame surface stays bootstrap-only`() {
+    fun `stable EchoLink frame surface includes paired session authentication`() {
         val stableCodes = EchoLinkProtocol.FrameType.entries.map { it.code }.toSet()
-        assertEquals(setOf(0x01, 0x02, 0x7f), stableCodes)
+        assertEquals(setOf(0x01, 0x02, 0x08, 0x09, 0x0a, 0x0b, 0x7f), stableCodes)
     }
 
     private fun hex(value: String): ByteArray {
