@@ -63,7 +63,13 @@ jobs:
         run: gradle :app:assembleDebug --stacktrace
 
       - name: Run unit tests
-        run: gradle :app:testDebugUnitTest --stacktrace
+        shell: bash
+        run: |
+          set +e
+          mkdir -p app/build/diagnostics
+          gradle :app:testDebugUnitTest --stacktrace 2>&1 | tee app/build/diagnostics/unit-tests.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          exit "$EXIT_CODE"
 
       - name: Upload unit test reports
         if: always()
@@ -71,6 +77,7 @@ jobs:
         with:
           name: echo360-unit-test-reports-${{ github.sha }}
           path: |
+            app/build/diagnostics/unit-tests.log
             app/build/test-results/testDebugUnitTest/**
             app/build/reports/tests/testDebugUnitTest/**
           if-no-files-found: warn
