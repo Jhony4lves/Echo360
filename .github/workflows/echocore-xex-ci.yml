@@ -43,7 +43,10 @@ jobs:
 
   toolchain:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    # A cold serial LLVM/Clang build completes all compile/link targets in about
+    # 2h45 on the hosted runner, then still needs install + xecorelib + SynthXEX.
+    # 180 minutes killed a proven-good build during install-distribution.
+    timeout-minutes: 300
 
     steps:
       - name: Checkout Echo360
