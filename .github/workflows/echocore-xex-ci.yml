@@ -43,7 +43,10 @@ jobs:
 
   toolchain:
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    # A cold serial LLVM/Clang build completes all compile/link targets in about
+    # 2h45 on the hosted runner, then still needs install + xecorelib + SynthXEX.
+    # 180 minutes killed a proven-good build during install-distribution.
+    timeout-minutes: 300
 
     steps:
       - name: Checkout Echo360
@@ -143,6 +146,9 @@ jobs:
       - name: Forge EchoCore resident SYS DLL XEX
         run: bash echocore/openxechain/build-echo-core-resident.sh
 
+      - name: Forge EchoCore NOVA remote loader XEX
+        run: bash echocore/openxechain/build-echo-core-loader.sh
+
       - name: Verify complete pre-hardware bundle exists
         run: |
           set -euxo pipefail
@@ -150,6 +156,7 @@ jobs:
           test -s /tmp/echocore-pairing-build/EchoCorePairing.xex
           test -s /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
           test -s /tmp/echocore-resident-build/EchoCoreResident.xex
+          test -s /tmp/echocore-loader-build/EchoCoreLoader.xex
           python3 - <<'PY'
           from pathlib import Path
           files = [
@@ -157,6 +164,7 @@ jobs:
               Path('/tmp/echocore-pairing-build/EchoCorePairing.xex'),
               Path('/tmp/echocore-plugin-build/EchoCorePluginSmoke.xex'),
               Path('/tmp/echocore-resident-build/EchoCoreResident.xex'),
+              Path('/tmp/echocore-loader-build/EchoCoreLoader.xex'),
           ]
           for path in files:
               data = path.read_bytes()
@@ -173,5 +181,6 @@ jobs:
             /tmp/echocore-pairing-build/EchoCorePairing.xex
             /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
             /tmp/echocore-resident-build/EchoCoreResident.xex
+            /tmp/echocore-loader-build/EchoCoreLoader.xex
           if-no-files-found: error
           retention-days: 30
