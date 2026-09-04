@@ -137,6 +137,9 @@ jobs:
       - name: Forge EchoCore physical pairing XEX
         run: bash echocore/openxechain/build-echo-core-pairing.sh
 
+      - name: Forge EchoCore one-shot auth probe XEX
+        run: bash echocore/openxechain/build-echo-core-auth-probe.sh
+
       - name: Forge EchoCore plugin smoke XEX
         run: bash echocore/openxechain/build-echo-core-plugin-smoke.sh
 
@@ -148,6 +151,7 @@ jobs:
           set -euxo pipefail
           test -s /tmp/echocore-build/EchoCore.xex
           test -s /tmp/echocore-pairing-build/EchoCorePairing.xex
+          test -s /tmp/echocore-auth-probe-build/EchoCoreAuthProbe.xex
           test -s /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
           test -s /tmp/echocore-resident-build/EchoCoreResident.xex
           python3 - <<'PY'
@@ -155,6 +159,7 @@ jobs:
           files = [
               Path('/tmp/echocore-build/EchoCore.xex'),
               Path('/tmp/echocore-pairing-build/EchoCorePairing.xex'),
+              Path('/tmp/echocore-auth-probe-build/EchoCoreAuthProbe.xex'),
               Path('/tmp/echocore-plugin-build/EchoCorePluginSmoke.xex'),
               Path('/tmp/echocore-resident-build/EchoCoreResident.xex'),
           ]
@@ -171,6 +176,7 @@ jobs:
           path: |
             /tmp/echocore-build/EchoCore.xex
             /tmp/echocore-pairing-build/EchoCorePairing.xex
+            /tmp/echocore-auth-probe-build/EchoCoreAuthProbe.xex
             /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
             /tmp/echocore-resident-build/EchoCoreResident.xex
           if-no-files-found: error
