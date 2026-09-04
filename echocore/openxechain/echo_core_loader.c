@@ -9,6 +9,12 @@
  * GAME:\\EchoCoreResident.xex as a system image, using the same XexLoadImage
  * flag used by established Xbox 360 homebrew plugin loaders.
  *
+ * Physical-hardware invariant:
+ * - a raw title _start must never return. Real Corona/RGH testing showed that
+ *   falling out of _start can reboot the whole console after otherwise-correct
+ *   work. Every loader outcome therefore requests normal XAM title termination
+ *   and parks forever as a fail-safe if that request unexpectedly returns.
+ *
  * Safety boundaries:
  * - no NAND access;
  * - no arbitrary path supplied over the network;
@@ -58,6 +64,7 @@ extern int NtWaitForSingleObjectEx(
 );
 extern int NtClose(uint32_t handle);
 extern int KeDelayExecutionThread(uint32_t processor_mode, uint32_t alertable, int64_t *interval_ptr);
+extern void XamLoaderTerminateTitle(void);
 extern void XNotifyQueueUI(
     uint32_t notification_type,
     uint32_t user_index,
@@ -105,6 +112,20 @@ static void echo_loader_notify(const char *text) {
     );
 }
 
+static _Noreturn void echo_loader_exit_title(void) {
+    echo_loader_zero(g_echo_loader_notice, sizeof(g_echo_loader_notice));
+
+    /* XAM owns normal title teardown. Never substitute a raw return from _start:
+     * physical Corona/RGH testing proved that path can reboot the console. */
+    XamLoaderTerminateTitle();
+
+    /* Termination should remove this title. If XAM only queues the request or
+     * unexpectedly returns, keep this entry thread alive until teardown lands. */
+    for (;;) {
+        echo_loader_delay_ms(1000U);
+    }
+}
+
 static uint32_t echo_loader_worker(void *context) {
     (void)context;
     g_echo_loader_module = (echo_hmodule)0;
@@ -124,13 +145,17 @@ void _start(void) {
     uint32_t query_status;
     int thread_status;
 
-    if (g_echo_loader_data_anchor != ECHO_LOADER_DATA_ANCHOR) return;
+    if (g_echo_loader_data_anchor != ECHO_LOADER_DATA_ANCHOR) {
+        echo_loader_notify("EchoCore Loader: data FAIL");
+        echo_loader_delay_ms(1800U);
+        echo_loader_exit_title();
+    }
 
     query_status = XexGetModuleHandle(ECHO_RESIDENT_MODULE_NAME, &existing);
     if (echo_loader_nt_success(query_status) && existing != (echo_hmodule)0) {
         echo_loader_notify("EchoCore: Resident ja ativo");
         echo_loader_delay_ms(1200U);
-        return;
+        echo_loader_exit_title();
     }
 
     g_echo_loader_status = ECHO_LOADER_STATUS_PENDING;
@@ -148,7 +173,7 @@ void _start(void) {
     if (thread_status < 0 || thread_handle == ECHO_LOADER_THREAD_NONE) {
         echo_loader_notify("EchoCore Loader: thread FAIL");
         echo_loader_delay_ms(1800U);
-        return;
+        echo_loader_exit_title();
     }
 
     (void)NtWaitForSingleObjectEx(
@@ -168,5 +193,5 @@ void _start(void) {
     }
 
     echo_loader_delay_ms(1800U);
-    echo_loader_zero(g_echo_loader_notice, sizeof(g_echo_loader_notice));
+    echo_loader_exit_title();
 }
