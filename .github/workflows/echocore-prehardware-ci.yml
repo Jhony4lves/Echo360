@@ -1,0 +1,99 @@
+name: EchoCore Pre-hardware CI
+
+on:
+  push:
+    branches:
+      - echocore/prehardware-integration
+    paths:
+      - 'echocore/**'
+      - '.github/workflows/echocore-prehardware-ci.yml'
+  pull_request:
+    paths:
+      - 'echocore/**'
+      - '.github/workflows/echocore-prehardware-ci.yml'
+
+concurrency:
+  group: echocore-prehardware-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  console-contracts:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Validate shell build scripts
+        run: |
+          set -euxo pipefail
+          bash -n echocore/openxechain/build-minimal-toolchain-fast.sh
+          bash -n echocore/openxechain/build-minimal-toolchain.sh
+          bash -n echocore/openxechain/build-echo-core.sh
+          bash -n echocore/openxechain/build-echo-core-pairing.sh
+          bash -n echocore/openxechain/build-echo-core-plugin-smoke.sh
+          bash -n echocore/openxechain/build-echo-core-resident.sh
+          bash -n echocore/tests/run-host-tests.sh
+
+      - name: Run protocol auth path transfer-state and writer behavior tests
+        run: bash echocore/tests/run-host-tests.sh
+
+      - name: Verify cross-platform physical pairing KDF vector
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          token = bytes(range(16))
+          expected = '7344e42de48a363d0454babae5d527f1bf0b43e319fd18da2062ebf524d050f4'
+          actual = hashlib.sha256(b'ECHO360-PAIRING-TOKEN-V1' + token).hexdigest()
+          assert actual == expected, (actual, expected)
+          print('EchoCore pairing KDF vector: OK')
+          PY
+
+      - name: Compile pure read-only contract tests
+        run: |
+          set -euxo pipefail
+          CFLAGS='-std=c11 -Wall -Wextra -Werror -pedantic'
+          clang ${CFLAGS} echocore/contract/echo_readonly_contract_test.c -o /tmp/echo-readonly-contract-test
+          clang ${CFLAGS} echocore/contract/echo_doctor_telemetry_test.c -o /tmp/echo-doctor-telemetry-test
+          clang ${CFLAGS} \
+            echocore/contract/echo_runtime_info_test.c \
+            echocore/contract/echo_runtime_info_xbox.c \
+            -o /tmp/echo-runtime-info-test
+
+      - name: Run pure read-only contract tests
+        run: |
+          set -euxo pipefail
+          /tmp/echo-readonly-contract-test
+          /tmp/echo-doctor-telemetry-test
+          /tmp/echo-runtime-info-test
+
+      - name: Syntax-check freestanding bootstrap and plugin entrypoints
+        run: |
+          set -euxo pipefail
+          CFLAGS='-std=c11 -Wall -Wextra -Werror -pedantic -ffreestanding -fno-builtin'
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_pairing_xex.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core_plugin_smoke.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_core_resident.c
+
+      - name: Syntax-check resident Xbox modules against versioned audited stubs
+        run: |
+          set -euxo pipefail
+          CFLAGS='-std=c11 -Wall -Wextra -Werror -pedantic -ffreestanding -fno-builtin -Iechocore/tests/xbox_stubs'
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_file_stat_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_dir_list_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_dashlaunch_snapshot_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_doctor_telemetry_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/contract/echo_runtime_info_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_auth_crypto_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_command_auth_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_request_pipeline_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_readonly_dispatch_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_session_engine_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_net_server_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_transfer_writer_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_pairing_store_xbox.c
+          clang ${CFLAGS} -fsyntax-only echocore/openxechain/echo_pairing_token_xbox.c

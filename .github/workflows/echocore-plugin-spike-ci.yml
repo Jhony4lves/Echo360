@@ -1,0 +1,131 @@
+name: EchoCore Plugin Spike CI
+
+on:
+  push:
+    branches:
+      - echocore/plugin-spike
+    paths:
+      - 'echocore/**'
+      - '.github/workflows/echocore-plugin-spike-ci.yml'
+
+concurrency:
+  group: echocore-plugin-spike
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
+  OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot-fast
+  OPENXECHAIN_CACHE_KEY: echocore-openxechain-fast-v2-Linux-eed1fa65bf9577fd31625764b320a90182ea9ade-cmake-3.31.10
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            binutils \
+            ninja-build \
+            make \
+            python3 \
+            python3-pip \
+            git \
+            zlib1g-dev
+          python3 -m pip install --user "cmake==3.31.10"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/cmake" --version
+
+      - name: Restore component-only OpenXeChain cache
+        id: toolchain-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.OPENXECHAIN_SYSROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
+
+      - name: Clone pinned OpenXeChain sources
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          : > /tmp/echocore-fast-toolchain.log
+          {
+            git config --global url."https://github.com/".insteadOf "git@github.com:"
+            git clone --no-checkout --filter=blob:none https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
+            cd /tmp/openxechain
+            git checkout "$OPENXECHAIN_BUILD_SHA"
+            git submodule sync --recursive
+            git submodule update --init --depth 1 llvm xecorelib synthxex
+            test "$(git rev-parse HEAD)" = "$OPENXECHAIN_BUILD_SHA"
+            git submodule status llvm xecorelib synthxex
+          } 2>&1 | tee -a /tmp/echocore-fast-toolchain.log
+
+      - name: Build component-only OpenXeChain toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain \
+            2>&1 | tee -a /tmp/echocore-fast-toolchain.log
+
+      # Save immediately after the expensive toolchain succeeds. This is
+      # intentionally not deferred to a post-job hook: a later EchoCore or
+      # plugin-link failure must not throw away an ~80 minute LLVM build.
+      - name: Save proven component-only OpenXeChain cache
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.OPENXECHAIN_SYSROOT }}
+          key: ${{ env.OPENXECHAIN_CACHE_KEY }}
+
+      - name: Upload fast toolchain log
+        if: always() && steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoCore-Fast-Toolchain-Log-${{ github.sha }}
+          path: /tmp/echocore-fast-toolchain.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Verify component-only toolchain
+        run: |
+          set -euxo pipefail
+          test -x "${OPENXECHAIN_SYSROOT}/bin/clang"
+          test -x "${OPENXECHAIN_SYSROOT}/bin/lld-link"
+          test -x "${OPENXECHAIN_SYSROOT}/bin/llvm-ar"
+          test -x "${OPENXECHAIN_SYSROOT}/bin/llvm-dlltool"
+          test -x "${OPENXECHAIN_SYSROOT}/bin/synthxex"
+          test -s "${OPENXECHAIN_SYSROOT}/lib/xecorelib.a"
+          "${OPENXECHAIN_SYSROOT}/bin/clang" --version
+
+      - name: Run EchoCore host tests
+        run: |
+          bash echocore/tests/run-host-tests.sh
+
+      - name: Build manual EchoCore title XEX
+        run: |
+          bash echocore/openxechain/build-echo-core.sh \
+            echocore/openxechain/echo_core.c \
+            /tmp/echocore-title-build
+
+      - name: Build EchoCore plugin smoke XEX
+        run: |
+          bash echocore/openxechain/build-echo-core-plugin-smoke.sh \
+            echocore/openxechain/echo_core_plugin_smoke.c \
+            /tmp/echocore-plugin-build
+
+      - name: Upload EchoCore title and plugin smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoCore-Spike-XEX-${{ github.sha }}
+          path: |
+            /tmp/echocore-title-build/EchoCore.xex
+            /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
+          if-no-files-found: error
+          retention-days: 30
