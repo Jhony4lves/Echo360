@@ -3,6 +3,7 @@
 
 #include "echo_net_server_xbox.h"
 #include "echo_session_engine_xbox.h"
+#include "echo_xnet_abi.h"
 
 #define ECHO_XNCALLER_SYSAPP 2U
 #define ECHO_AF_INET 2U
@@ -271,8 +272,10 @@ int echo_xbox_run_paired_readonly_server(
     uint8_t wsa_data[0x200];
     uint8_t listen_address[16];
     uint8_t peer_address[16];
+    echo_xnet_startup_params xnet_params;
     uint32_t server = ECHO_INVALID_SOCKET;
     uint32_t reuse_address = 1U;
+    uint32_t socket_true = 1U;
     uint32_t nonblocking = 1U;
     int xnet_started = 0;
     int wsa_started = 0;
@@ -285,19 +288,39 @@ int echo_xbox_run_paired_readonly_server(
     echo_net_zero(peer_address, sizeof(peer_address));
     echo_net_zero(g_echo_server_rx, sizeof(g_echo_server_rx));
     echo_net_zero(g_echo_server_tx, sizeof(g_echo_server_tx));
+    echo_xnet_prepare_startup(&xnet_params);
 
     listen_address[0] = 0U;
     listen_address[1] = ECHO_AF_INET;
     listen_address[2] = (uint8_t)(ECHO_SERVER_PORT >> 8U);
     listen_address[3] = (uint8_t)ECHO_SERVER_PORT;
 
-    if (NetDll_XNetStartup(ECHO_XNCALLER_SYSAPP, NULL) != 0) goto cleanup;
+    if (NetDll_XNetStartup(ECHO_XNCALLER_SYSAPP, &xnet_params) != 0) goto cleanup;
     xnet_started = 1;
     if (NetDll_WSAStartup(ECHO_XNCALLER_SYSAPP, 0x0202U, wsa_data) != 0) goto cleanup;
     wsa_started = 1;
 
     server = NetDll_socket(ECHO_XNCALLER_SYSAPP, ECHO_AF_INET, ECHO_SOCK_STREAM, 0U);
     if (server == ECHO_INVALID_SOCKET) goto cleanup;
+
+    /* Hardware-proven LAN path: bypass XNet title security and explicitly mark
+     * the listener insecure so an ordinary phone/PC TCP peer can connect. */
+    if (NetDll_setsockopt(
+            ECHO_XNCALLER_SYSAPP,
+            server,
+            ECHO_SOL_SOCKET,
+            ECHO_XNET_SO_INSECURE,
+            &socket_true,
+            sizeof(socket_true)
+        ) != 0) goto cleanup;
+    (void)NetDll_setsockopt(
+        ECHO_XNCALLER_SYSAPP,
+        server,
+        ECHO_SOL_SOCKET,
+        ECHO_XNET_SO_BYPASS_ENCRYPTION,
+        &socket_true,
+        sizeof(socket_true)
+    );
 
     if (NetDll_setsockopt(
             ECHO_XNCALLER_SYSAPP,
@@ -360,6 +383,7 @@ cleanup:
         (void)NetDll_closesocket(ECHO_XNCALLER_SYSAPP, server);
     }
     if (wsa_started) (void)NetDll_WSACleanup(ECHO_XNCALLER_SYSAPP);
-    if (xnet_started) (void)NetDll_XNetCleanup(ECHO_XNCALLER_SYSAPP, NULL);
+    if (xnet_started) (void)NetDll_XNetCleanup(ECHO_XNCALLER_SYSAPP, &xnet_params);
+    echo_net_zero(&xnet_params, sizeof(xnet_params));
     return final_result;
 }
