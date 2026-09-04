@@ -38,6 +38,7 @@ rm -f "${PE}" "${XEX}"
   -ffreestanding \
   -fno-builtin \
   -nostdlib \
+  -DECHO_SERVER_PORT=36000U \
   -I"${SYSROOT}/include" \
   -Wall \
   -Wextra \
