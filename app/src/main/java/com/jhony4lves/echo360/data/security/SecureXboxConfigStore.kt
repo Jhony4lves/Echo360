@@ -92,6 +92,7 @@ class SecureXboxConfigStore(context: Context) {
         put("auroraFtpPort", profile.endpoint.auroraFtpPort)
         put("ftpDllPort", profile.endpoint.ftpDllPort)
         put("credentials", JSONObject().apply {
+            put("echoCorePairingToken", profile.credentials.echoCorePairingToken)
             put("novaUsername", profile.credentials.novaUsername)
             put("novaPassword", profile.credentials.novaPassword)
             put("auroraFtpUsername", profile.credentials.auroraFtpUsername)
@@ -112,6 +113,7 @@ class SecureXboxConfigStore(context: Context) {
                 ftpDllPort = json.optInt("ftpDllPort", 7564),
             ),
             credentials = XboxCredentials(
+                echoCorePairingToken = credentials.optString("echoCorePairingToken", ""),
                 novaUsername = credentials.optString("novaUsername", ""),
                 novaPassword = credentials.optString("novaPassword", ""),
                 auroraFtpUsername = credentials.optString("auroraFtpUsername", ""),

@@ -21,6 +21,7 @@ data class XboxEndpoint(
 }
 
 data class XboxCredentials(
+    val echoCorePairingToken: String = "",
     val novaUsername: String = "",
     val novaPassword: String = "",
     val auroraFtpUsername: String = "",

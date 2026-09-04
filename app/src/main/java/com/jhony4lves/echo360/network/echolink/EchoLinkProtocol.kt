@@ -14,6 +14,10 @@ object EchoLinkProtocol {
     enum class FrameType(val code: Int) {
         Ping(0x01),
         Pong(0x02),
+        SessionBeginRequest(0x08),
+        SessionChallengeResponse(0x09),
+        SessionAuthRequest(0x0a),
+        SessionAuthResponse(0x0b),
         Error(0x7f),
         ;
 
