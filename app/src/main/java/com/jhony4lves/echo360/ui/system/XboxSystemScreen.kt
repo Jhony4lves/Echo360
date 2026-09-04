@@ -85,6 +85,7 @@ fun XboxSystemScreen(
     var auroraPort by remember { mutableStateOf(initial.endpoint.auroraFtpPort.toString()) }
     var ftpDllPort by remember { mutableStateOf(initial.endpoint.ftpDllPort.toString()) }
 
+    var echoCoreToken by remember { mutableStateOf(initial.credentials.echoCorePairingToken) }
     var novaUser by remember { mutableStateOf(initial.credentials.novaUsername) }
     var novaPassword by remember { mutableStateOf(initial.credentials.novaPassword) }
     var auroraUser by remember { mutableStateOf(initial.credentials.auroraFtpUsername) }
@@ -92,6 +93,7 @@ fun XboxSystemScreen(
     var ftpDllUser by remember { mutableStateOf(initial.credentials.ftpDllUsername) }
     var ftpDllPassword by remember { mutableStateOf(initial.credentials.ftpDllPassword) }
 
+    var showEchoCoreToken by remember { mutableStateOf(false) }
     var showNovaPassword by remember { mutableStateOf(false) }
     var showAuroraPassword by remember { mutableStateOf(false) }
     var showFtpDllPassword by remember { mutableStateOf(false) }
@@ -110,6 +112,7 @@ fun XboxSystemScreen(
                 ftpDllPort = ftpDllPort.toInt(),
             ).validated(),
             credentials = XboxCredentials(
+                echoCorePairingToken = echoCoreToken.trim(),
                 novaUsername = novaUser,
                 novaPassword = novaPassword,
                 auroraFtpUsername = auroraUser,
@@ -229,6 +232,54 @@ fun XboxSystemScreen(
                         PortField("Aurora", auroraPort, { auroraPort = it }, Modifier.weight(1f))
                         PortField("FTPdll", ftpDllPort, { ftpDllPort = it }, Modifier.weight(1f))
                     }
+
+                    EchoTextField(
+                        value = echoCoreToken,
+                        onValueChange = { input ->
+                            echoCoreToken = input
+                                .uppercase()
+                                .filter { it.isLetterOrDigit() || it == '-' || it.isWhitespace() }
+                                .take(40)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "Token de pareamento EchoCore",
+                        singleLine = true,
+                        visualTransformation = if (showEchoCoreToken) {
+                            VisualTransformation.None
+                        } else {
+                            PasswordVisualTransformation()
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.Lock,
+                                contentDescription = null,
+                                tint = EchoColors.TextSecondary,
+                            )
+                        },
+                        trailingIcon = {
+                            IconButton(onClick = { showEchoCoreToken = !showEchoCoreToken }) {
+                                Icon(
+                                    imageVector = if (showEchoCoreToken) {
+                                        Icons.Outlined.VisibilityOff
+                                    } else {
+                                        Icons.Outlined.Visibility
+                                    },
+                                    contentDescription = if (showEchoCoreToken) {
+                                        "Ocultar token EchoCore"
+                                    } else {
+                                        "Mostrar token EchoCore"
+                                    },
+                                    tint = EchoColors.TextSecondary,
+                                )
+                            }
+                        },
+                    )
+                    Text(
+                        text = "Use o código exibido pelo EchoCorePairing.xex. O app deriva a chave localmente; o token não é enviado em texto puro pela rede.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = EchoColors.TextSecondary,
+                    )
                 }
             }
         }
@@ -378,6 +429,7 @@ private fun ConsoleHeader() {
             Spacer(Modifier.width(12.dp))
             SecurePill()
         }
+
         Spacer(Modifier.height(8.dp))
         Text(
             text = "EchoCore primeiro, NOVA/FTP como compatibilidade. Credenciais continuam protegidas pelo Android Keystore.",
@@ -524,7 +576,7 @@ private fun SecurityInfoPanel() {
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = "EchoCore usa apenas PING/PONG no bootstrap atual. Pairing/auth e comandos privilegiados só entram quando o contrato Xbox-side estiver fechado.",
+                text = "EchoCore usa pairing por challenge/HMAC. O token fica no armazenamento cifrado do app e os comandos read-only só são liberados depois da autenticação.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
