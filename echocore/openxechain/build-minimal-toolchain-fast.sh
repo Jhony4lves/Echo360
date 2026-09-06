@@ -16,7 +16,10 @@ LLVM_BUILD="${ROOT}/build-llvm-fast"
 XECORE_BUILD="${ROOT}/build-xecorelib-fast"
 SYNTH_BUILD="${ROOT}/build-synthxex-fast"
 SMOKE_BUILD="${ROOT}/build-driver-smoke"
-LLVM_COMPONENTS="clang;clang-resource-headers;lld;llvm-ar"
+# llvm-dlltool is a real OpenXeChain dependency: xecorelib uses
+# `llvm-dlltool -m xbox360` to create the xboxkrnl and XAM import libraries.
+# Do not fake it with an llvm-ar symlink.
+LLVM_COMPONENTS="clang;clang-resource-headers;lld;llvm-ar;llvm-dlltool"
 
 log_resources() {
   local label="${1:-resources}"
@@ -113,7 +116,7 @@ build_llvm() {
 }
 
 install_llvm() {
-  local component
+  local component binary
 
   if [[ ! -f "${LLVM_BUILD}/.echocore-distribution-complete" ]]; then
     echo "EchoCore fast toolchain: completed LLVM build stamp is missing" >&2
@@ -124,22 +127,17 @@ install_llvm() {
   mkdir -p "${PREFIX}"
   log_resources "before LLVM install"
 
-  # Install only the four components EchoCore needs. Calling cmake --install
-  # directly avoids re-entering Ninja's dependency graph after a multi-hour
-  # compile. The previous CI run finished all 3064 build targets and was then
-  # terminated while install-distribution was copying Clang.
-  for component in clang-resource-headers clang lld llvm-ar; do
+  # Install only what EchoCore needs. Keep this phase free of contract tests:
+  # GitHub Actions checkpoints the installed sysroot immediately after this
+  # returns so a cheap verifier can never discard a multi-hour LLVM build.
+  for component in clang-resource-headers clang lld llvm-ar llvm-dlltool; do
     echo "EchoCore fast toolchain: installing LLVM component ${component}"
     cmake --install "${LLVM_BUILD}" --component "${component}"
   done
 
-  if [[ ! -e "${PREFIX}/bin/llvm-dlltool" ]]; then
-    ln -s llvm-ar "${PREFIX}/bin/llvm-dlltool"
-  fi
-
   for binary in clang lld lld-link llvm-ar llvm-dlltool; do
     if [[ ! -x "${PREFIX}/bin/${binary}" ]]; then
-      echo "EchoCore fast toolchain: expected LLVM tool missing: ${binary}" >&2
+      echo "EchoCore fast toolchain: expected LLVM tool missing after install: ${binary}" >&2
       exit 5
     fi
   done
@@ -160,31 +158,56 @@ EOF_CFG
 -mlongcall
 EOF_CFG
 
+  printf '%s\n' "${LLVM_COMPONENTS}" > "${PREFIX}/.echocore-llvm-installed"
   log_resources "after LLVM install"
 }
 
 verify_llvm_driver() {
-  local effective_driver
+  local binary effective_driver
+
+  echo "===== EchoCore LLVM contract verification ====="
+  if [[ ! -f "${PREFIX}/.echocore-llvm-installed" ]]; then
+    echo "EchoCore LLVM verifier: install checkpoint stamp is missing: ${PREFIX}/.echocore-llvm-installed" >&2
+    exit 6
+  fi
+
+  echo "-- installed binaries --"
+  ls -la "${PREFIX}/bin" || true
 
   for binary in clang lld lld-link llvm-ar llvm-dlltool; do
-    test -x "${PREFIX}/bin/${binary}"
+    echo "==> checking ${binary}"
+    if [[ ! -x "${PREFIX}/bin/${binary}" ]]; then
+      echo "EchoCore LLVM verifier: missing executable ${PREFIX}/bin/${binary}" >&2
+      exit 7
+    fi
+    ls -l "${PREFIX}/bin/${binary}"
   done
+
+  echo "==> clang version"
+  "${PREFIX}/bin/clang" --version
+  echo "==> llvm-ar version"
+  "${PREFIX}/bin/llvm-ar" --version
+  echo "==> REAL llvm-dlltool version"
+  "${PREFIX}/bin/llvm-dlltool" --version
 
   # The OpenXeChain fork models xbox360 as an OS in llvm::Triple. A two-part
   # spelling such as ppc32-xbox360 is normalized as arch+vendor and loses the
   # Xbox OS. Keep the explicit unknown vendor in clang.cfg and prove it here.
+  echo "==> checking effective Clang target"
   effective_driver="$(${PREFIX}/bin/clang -### -c -x c /dev/null 2>&1 || true)"
+  printf '%s\n' "${effective_driver}"
   case "${effective_driver}" in
     *powerpc-unknown-xbox360*|*ppc32-unknown-xbox360*) ;;
     *)
-      echo "EchoCore fast toolchain: Clang did not select the Xbox 360 target" >&2
-      printf '%s\n' "${effective_driver}" >&2
-      exit 6
+      echo "EchoCore LLVM verifier: Clang did not select the Xbox 360 target" >&2
+      exit 8
       ;;
   esac
 
   rm -rf "${SMOKE_BUILD}"
   mkdir -p "${SMOKE_BUILD}"
+
+  echo "==> PowerPC/Xbox assembly smoke"
   cat > "${SMOKE_BUILD}/echocore-asm-smoke.s" <<'EOF_ASM'
     .text
     .globl echo_asm_smoke
@@ -196,7 +219,23 @@ EOF_ASM
     "${SMOKE_BUILD}/echocore-asm-smoke.s" \
     -o "${SMOKE_BUILD}/echocore-asm-smoke.o"
   test -s "${SMOKE_BUILD}/echocore-asm-smoke.o"
-  "${PREFIX}/bin/llvm-dlltool" --version >/dev/null
+  file "${SMOKE_BUILD}/echocore-asm-smoke.o" || true
+
+  echo "==> Xbox 360 llvm-dlltool import-library smoke"
+  cat > "${SMOKE_BUILD}/echocore-dlltool-smoke.def" <<'EOF_DEF'
+LIBRARY echocore_smoke
+EXPORTS
+    EchoCoreSmoke @1
+EOF_DEF
+  "${PREFIX}/bin/llvm-dlltool" \
+    -m xbox360 \
+    -d "${SMOKE_BUILD}/echocore-dlltool-smoke.def" \
+    -l "${SMOKE_BUILD}/echocore-dlltool-smoke.a"
+  test -s "${SMOKE_BUILD}/echocore-dlltool-smoke.a"
+  "${PREFIX}/bin/llvm-ar" t "${SMOKE_BUILD}/echocore-dlltool-smoke.a"
+
+  echo "EchoCore LLVM contract verification: PASS"
+  echo "=============================================="
 }
 
 build_xecorelib() {
@@ -244,6 +283,8 @@ case "${PHASE}" in
     configure_llvm
     build_llvm
     install_llvm
+    ;;
+  llvm-verify)
     verify_llvm_driver
     ;;
   finalize)
@@ -266,7 +307,7 @@ case "${PHASE}" in
     verify_complete_toolchain
     ;;
   *)
-    echo "Usage: $0 [openxechain-root] [llvm-stage|finalize|all]" >&2
+    echo "Usage: $0 [openxechain-root] [llvm-stage|llvm-verify|finalize|all]" >&2
     exit 64
     ;;
 esac
