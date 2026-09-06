@@ -17,7 +17,9 @@ permissions:
 env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
-  ECHO_TOOLCHAIN_CACHE_KEY: echocore-openxechain-min-v2
+  ECHO_TOOLCHAIN_CACHE_VERSION: v3
+  CCACHE_DIR: /tmp/echocore-ccache
+  CCACHE_MAXSIZE: 2G
 
 jobs:
   core-host-tests:
@@ -41,18 +43,141 @@ jobs:
           assert actual == expected, (actual, expected)
           PY
 
-  toolchain:
+  llvm-stage:
     runs-on: ubuntu-22.04
-    # A cold serial LLVM/Clang build completes all compile/link targets in about
-    # 2h45 on the hosted runner, then still needs install + xecorelib + SynthXEX.
-    # 180 minutes killed a proven-good build during install-distribution.
-    timeout-minutes: 300
+    timeout-minutes: 240
 
     steps:
       - name: Checkout Echo360
         uses: actions/checkout@v5
 
-      - name: Install host dependencies
+      - name: Restore finished OpenXeChain toolchain
+        id: final-toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-final-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+
+      - name: Restore installed LLVM stage
+        if: steps.final-toolchain.outputs.cache-hit != 'true'
+        id: llvm-stage-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+
+      - name: Install LLVM build dependencies
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            binutils \
+            ccache \
+            ninja-build \
+            make \
+            python3 \
+            python3-pip \
+            git \
+            zlib1g-dev
+          python3 -m pip install --user "cmake==3.31.10"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/cmake" --version
+          ccache --version
+
+      - name: Clone pinned OpenXeChain LLVM source
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git clone --no-checkout --filter=blob:none https://github.com/OpenXeChain/buildscript.git /tmp/openxechain
+          cd /tmp/openxechain
+          git checkout "$OPENXECHAIN_BUILD_SHA"
+          git submodule sync --recursive
+          git submodule update --init --depth 1 llvm
+          test "$(git rev-parse HEAD)" = "$OPENXECHAIN_BUILD_SHA"
+          git submodule status llvm
+
+      - name: Restore LLVM ccache checkpoint
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
+        id: llvm-ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/echocore-ccache
+          key: echocore-openxechain-ccache-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+
+      - name: Build and install minimal LLVM stage serially
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
+        env:
+          LLVM_PARALLEL: 1
+          USE_CCACHE: 1
+        run: |
+          set -o pipefail
+          : > /tmp/echocore-llvm-stage.log
+          bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain llvm-stage \
+            2>&1 | tee /tmp/echocore-llvm-stage.log
+
+      - name: Save first LLVM ccache checkpoint
+        if: always() && steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true' && steps.llvm-ccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/echocore-ccache
+          key: echocore-openxechain-ccache-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+
+      - name: Upload LLVM stage diagnostics
+        if: always() && steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocore-llvm-stage-log-${{ github.sha }}
+          path: /tmp/echocore-llvm-stage.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Verify installed LLVM stage
+        if: steps.final-toolchain.outputs.cache-hit != 'true'
+        run: |
+          test -x "$OPENXECHAIN_SYSROOT/bin/clang"
+          test -x "$OPENXECHAIN_SYSROOT/bin/lld-link"
+          test -x "$OPENXECHAIN_SYSROOT/bin/llvm-ar"
+          test -x "$OPENXECHAIN_SYSROOT/bin/llvm-dlltool"
+          "$OPENXECHAIN_SYSROOT/bin/clang" --version
+          free -h
+          df -h /tmp
+          du -sh "$OPENXECHAIN_SYSROOT"
+
+      - name: Save installed LLVM stage
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+
+  toolchain:
+    needs:
+      - llvm-stage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Echo360
+        uses: actions/checkout@v5
+
+      - name: Restore finished OpenXeChain toolchain
+        id: toolchain-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-final-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+
+      - name: Restore installed LLVM stage
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+          fail-on-cache-miss: true
+
+      - name: Install finalization dependencies
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -68,14 +193,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/cmake" --version
 
-      - name: Restore proven OpenXeChain cache
-        id: toolchain-cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/openxechain-sysroot
-          key: ${{ env.ECHO_TOOLCHAIN_CACHE_KEY }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
-
-      - name: Clone pinned OpenXeChain sources
+      - name: Clone pinned xecorelib and SynthXEX sources
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: |
           git config --global url."https://github.com/".insteadOf "git@github.com:"
@@ -83,30 +201,28 @@ jobs:
           cd /tmp/openxechain
           git checkout "$OPENXECHAIN_BUILD_SHA"
           git submodule sync --recursive
-          git submodule update --init --depth 1 llvm xecorelib synthxex
+          git submodule update --init --depth 1 xecorelib synthxex
           test "$(git rev-parse HEAD)" = "$OPENXECHAIN_BUILD_SHA"
-          git submodule status llvm xecorelib synthxex
+          git submodule status xecorelib synthxex
 
-      - name: Build component-only OpenXeChain toolchain serially
+      - name: Finalize OpenXeChain sysroot
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
-        env:
-          LLVM_PARALLEL: 1
         run: |
           set -o pipefail
-          : > /tmp/echocore-toolchain-build.log
-          bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain \
-            2>&1 | tee /tmp/echocore-toolchain-build.log
+          : > /tmp/echocore-toolchain-finalize.log
+          bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain finalize \
+            2>&1 | tee /tmp/echocore-toolchain-finalize.log
 
-      - name: Upload toolchain build log
+      - name: Upload toolchain finalization diagnostics
         if: always() && steps.toolchain-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: echocore-toolchain-log-${{ github.sha }}
-          path: /tmp/echocore-toolchain-build.log
+          name: echocore-toolchain-finalize-log-${{ github.sha }}
+          path: /tmp/echocore-toolchain-finalize.log
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Verify toolchain
+      - name: Verify complete toolchain
         run: |
           test -x "$OPENXECHAIN_SYSROOT/bin/clang"
           test -x "$OPENXECHAIN_SYSROOT/bin/lld-link"
@@ -115,6 +231,14 @@ jobs:
           test -x "$OPENXECHAIN_SYSROOT/bin/synthxex"
           test -s "$OPENXECHAIN_SYSROOT/lib/xecorelib.a"
           "$OPENXECHAIN_SYSROOT/bin/clang" --version
+          du -sh "$OPENXECHAIN_SYSROOT"
+
+      - name: Save finished OpenXeChain toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/openxechain-sysroot
+          key: echocore-openxechain-final-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
 
   echocore-bundle:
     needs:
@@ -131,17 +255,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /tmp/openxechain-sysroot
-          key: ${{ env.ECHO_TOOLCHAIN_CACHE_KEY }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10
+          key: echocore-openxechain-final-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
           fail-on-cache-miss: true
-
-      - name: Forge EchoCore hardware bootstrap
-        run: bash echocore/openxechain/build-echo-core.sh
 
       - name: Forge EchoCore physical pairing XEX
         run: bash echocore/openxechain/build-echo-core-pairing.sh
-
-      - name: Forge EchoCore plugin smoke XEX
-        run: bash echocore/openxechain/build-echo-core-plugin-smoke.sh
 
       - name: Forge EchoCore resident SYS DLL XEX
         run: bash echocore/openxechain/build-echo-core-resident.sh
@@ -149,20 +267,16 @@ jobs:
       - name: Forge EchoCore NOVA remote loader XEX
         run: bash echocore/openxechain/build-echo-core-loader.sh
 
-      - name: Verify complete pre-hardware bundle exists
+      - name: Verify hardware-candidate bundle exists
         run: |
           set -euxo pipefail
-          test -s /tmp/echocore-build/EchoCore.xex
           test -s /tmp/echocore-pairing-build/EchoCorePairing.xex
-          test -s /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
           test -s /tmp/echocore-resident-build/EchoCoreResident.xex
           test -s /tmp/echocore-loader-build/EchoCoreLoader.xex
           python3 - <<'PY'
           from pathlib import Path
           files = [
-              Path('/tmp/echocore-build/EchoCore.xex'),
               Path('/tmp/echocore-pairing-build/EchoCorePairing.xex'),
-              Path('/tmp/echocore-plugin-build/EchoCorePluginSmoke.xex'),
               Path('/tmp/echocore-resident-build/EchoCoreResident.xex'),
               Path('/tmp/echocore-loader-build/EchoCoreLoader.xex'),
           ]
@@ -172,15 +286,33 @@ jobs:
               print(path.name, len(data), 'bytes', 'XEX2')
           PY
 
-      - name: Upload complete EchoCore pre-hardware bundle
+      - name: Write physical-test manifest
+        run: |
+          cat > /tmp/EchoCore-HARDWARE-README.txt <<'EOF_MANIFEST'
+          EchoCore hardware candidate
+
+          Included:
+          - EchoCorePairing.xex   : local pairing-token display/recovery
+          - EchoCoreResident.xex  : resident authenticated LAN service
+          - EchoCoreLoader.xex    : NOVA-launchable loader for the sibling resident
+
+          Deliberately NOT included:
+          - legacy EchoCore.xex bootstrap. Physical Corona/RGH testing proved that
+            returning from its raw title _start can reboot the console after a
+            successful EchoLink exchange. Keep it quarantined from hardware use.
+
+          First hardware pass remains reversible: Pairing + Loader + Resident only.
+          Do not install a DashLaunch boot plugin yet.
+          EOF_MANIFEST
+
+      - name: Upload EchoCore hardware-candidate bundle
         uses: actions/upload-artifact@v4
         with:
-          name: EchoCore-Prehardware-XEX-${{ github.sha }}
+          name: EchoCore-HardwareCandidate-XEX-${{ github.sha }}
           path: |
-            /tmp/echocore-build/EchoCore.xex
             /tmp/echocore-pairing-build/EchoCorePairing.xex
-            /tmp/echocore-plugin-build/EchoCorePluginSmoke.xex
             /tmp/echocore-resident-build/EchoCoreResident.xex
             /tmp/echocore-loader-build/EchoCoreLoader.xex
+            /tmp/EchoCore-HARDWARE-README.txt
           if-no-files-found: error
           retention-days: 30
