@@ -17,7 +17,7 @@ permissions:
 env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
-  ECHO_TOOLCHAIN_CACHE_VERSION: v3
+  ECHO_TOOLCHAIN_CACHE_VERSION: v4
   CCACHE_DIR: /tmp/echocore-ccache
   CCACHE_MAXSIZE: 2G
 
@@ -58,7 +58,7 @@ jobs:
           path: /tmp/openxechain-sysroot
           key: echocore-openxechain-final-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
 
-      - name: Restore installed LLVM stage
+      - name: Restore installed LLVM checkpoint
         if: steps.final-toolchain.outputs.cache-hit != 'true'
         id: llvm-stage-cache
         uses: actions/cache/restore@v4
@@ -103,9 +103,13 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /tmp/echocore-ccache
-          key: echocore-openxechain-ccache-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+          key: echocore-openxechain-ccache-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-${{ github.run_id }}
+          restore-keys: |
+            echocore-openxechain-ccache-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-
+            echocore-openxechain-ccache-v3-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-
 
       - name: Build and install minimal LLVM stage serially
+        id: llvm-build
         if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
         env:
           LLVM_PARALLEL: 1
@@ -116,14 +120,16 @@ jobs:
           bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain llvm-stage \
             2>&1 | tee /tmp/echocore-llvm-stage.log
 
-      - name: Save first LLVM ccache checkpoint
+      # Save compiler object work even if a later stage fails. The key is per-run
+      # and restore-keys select the newest compatible checkpoint next time.
+      - name: Save LLVM ccache checkpoint
         if: always() && steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true' && steps.llvm-ccache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: /tmp/echocore-ccache
-          key: echocore-openxechain-ccache-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+          key: echocore-openxechain-ccache-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-${{ github.run_id }}
 
-      - name: Upload LLVM stage diagnostics
+      - name: Upload LLVM build diagnostics
         if: always() && steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -132,24 +138,49 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Verify installed LLVM stage
-        if: steps.final-toolchain.outputs.cache-hit != 'true'
-        run: |
-          test -x "$OPENXECHAIN_SYSROOT/bin/clang"
-          test -x "$OPENXECHAIN_SYSROOT/bin/lld-link"
-          test -x "$OPENXECHAIN_SYSROOT/bin/llvm-ar"
-          test -x "$OPENXECHAIN_SYSROOT/bin/llvm-dlltool"
-          "$OPENXECHAIN_SYSROOT/bin/clang" --version
-          free -h
-          df -h /tmp
-          du -sh "$OPENXECHAIN_SYSROOT"
-
-      - name: Save installed LLVM stage
-        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
+      # Critical boundary: checkpoint the installed sysroot BEFORE any contract
+      # test. A verifier failure can now cost seconds/minutes, never the LLVM build.
+      - name: Save installed LLVM checkpoint
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true' && steps.llvm-build.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: /tmp/openxechain-sysroot
           key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+
+      - name: Package durable LLVM checkpoint
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true' && steps.llvm-build.outcome == 'success'
+        run: |
+          tar -C /tmp -czf /tmp/echocore-openxechain-llvm-stage.tar.gz openxechain-sysroot
+          ls -lh /tmp/echocore-openxechain-llvm-stage.tar.gz
+
+      - name: Upload durable LLVM checkpoint
+        if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true' && steps.llvm-build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocore-openxechain-llvm-stage-${{ github.sha }}
+          path: /tmp/echocore-openxechain-llvm-stage.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify installed LLVM contract
+        if: steps.final-toolchain.outputs.cache-hit != 'true'
+        run: |
+          set -o pipefail
+          : > /tmp/echocore-llvm-verify.log
+          bash echocore/openxechain/build-minimal-toolchain-fast.sh /tmp/openxechain llvm-verify \
+            2>&1 | tee /tmp/echocore-llvm-verify.log
+          free -h
+          df -h /tmp
+          du -sh "$OPENXECHAIN_SYSROOT"
+
+      - name: Upload LLVM contract diagnostics
+        if: always() && steps.final-toolchain.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: echocore-llvm-contract-log-${{ github.sha }}
+          path: /tmp/echocore-llvm-verify.log
+          if-no-files-found: warn
+          retention-days: 14
 
   toolchain:
     needs:
@@ -168,7 +199,7 @@ jobs:
           path: /tmp/openxechain-sysroot
           key: echocore-openxechain-final-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
 
-      - name: Restore installed LLVM stage
+      - name: Restore installed LLVM checkpoint
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@v4
         with:
@@ -231,6 +262,7 @@ jobs:
           test -x "$OPENXECHAIN_SYSROOT/bin/synthxex"
           test -s "$OPENXECHAIN_SYSROOT/lib/xecorelib.a"
           "$OPENXECHAIN_SYSROOT/bin/clang" --version
+          "$OPENXECHAIN_SYSROOT/bin/llvm-dlltool" --version
           du -sh "$OPENXECHAIN_SYSROOT"
 
       - name: Save finished OpenXeChain toolchain
