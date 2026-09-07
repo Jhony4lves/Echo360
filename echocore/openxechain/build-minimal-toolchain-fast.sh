@@ -187,8 +187,7 @@ verify_llvm_driver() {
   "${PREFIX}/bin/clang" --version
   echo "==> llvm-ar version"
   "${PREFIX}/bin/llvm-ar" --version
-  echo "==> REAL llvm-dlltool version"
-  "${PREFIX}/bin/llvm-dlltool" --version
+  echo "==> llvm-dlltool functionality is verified by the xbox360 import-library smoke below"
 
   # The OpenXeChain fork models xbox360 as an OS in llvm::Triple. A two-part
   # spelling such as ppc32-xbox360 is normalized as arch+vendor and loses the
