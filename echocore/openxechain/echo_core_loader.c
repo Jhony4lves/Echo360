@@ -6,8 +6,8 @@
  *
  * This is a tiny title XEX intended to be launched by Aurora/NOVA from the
  * phone. It does exactly one privileged action: load the sibling
- * GAME:\\EchoCoreResident.xex as a system image, using the same XexLoadImage
- * flag used by established Xbox 360 homebrew plugin loaders.
+ * GAME:\\EchoCoreResident.xex as a system DLL, using the canonical
+ * XEX_LOADIMG_TYPE_SYSTEM_DLL flags (DLL | TITLE_IMPORTS = 0x0A).
  *
  * Physical-hardware invariant:
  * - a raw title _start must never return. Real Corona/RGH testing showed that
@@ -23,7 +23,7 @@
  * - duplicate invocations are idempotent when the resident is already loaded.
  */
 
-#define ECHO_LOADER_SYSTEM_IMAGE_FLAGS 8U
+#define ECHO_LOADER_SYSTEM_DLL_FLAGS 0x0000000AU
 #define ECHO_LOADER_SYSTEM_THREAD_FLAG 0x00000002U
 #define ECHO_LOADER_THREAD_NONE 0U
 #define ECHO_LOADER_KERNEL_MODE 0U
@@ -131,7 +131,7 @@ static uint32_t echo_loader_worker(void *context) {
     g_echo_loader_module = (echo_hmodule)0;
     g_echo_loader_status = XexLoadImage(
         ECHO_RESIDENT_GAME_PATH,
-        ECHO_LOADER_SYSTEM_IMAGE_FLAGS,
+        ECHO_LOADER_SYSTEM_DLL_FLAGS,
         0U,
         &g_echo_loader_module
     );
