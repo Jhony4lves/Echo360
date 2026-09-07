@@ -18,6 +18,10 @@ env:
   OPENXECHAIN_BUILD_SHA: eed1fa65bf9577fd31625764b320a90182ea9ade
   OPENXECHAIN_SYSROOT: /tmp/openxechain-sysroot
   ECHO_TOOLCHAIN_CACHE_VERSION: v4
+  # Compatibility fingerprint of the already-built LLVM sysroot contract.
+  # Bump only when LLVM configure/build/install output changes; verifier-only
+  # edits must keep this value so a multi-hour checkpoint stays reusable.
+  ECHO_LLVM_CACHE_COMPAT: 7022374a6852c8e89eccb7a0cffc21bfe986612f8a0acb3c3dfeccc6d3196f02
   CCACHE_DIR: /tmp/echocore-ccache
   CCACHE_MAXSIZE: 2G
 
@@ -64,7 +68,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /tmp/openxechain-sysroot
-          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ env.ECHO_LLVM_CACHE_COMPAT }}
 
       - name: Install LLVM build dependencies
         if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true'
@@ -145,7 +149,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: /tmp/openxechain-sysroot
-          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ env.ECHO_LLVM_CACHE_COMPAT }}
 
       - name: Package durable LLVM checkpoint
         if: steps.final-toolchain.outputs.cache-hit != 'true' && steps.llvm-stage-cache.outputs.cache-hit != 'true' && steps.llvm-build.outcome == 'success'
@@ -204,7 +208,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /tmp/openxechain-sysroot
-          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
+          key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ env.ECHO_LLVM_CACHE_COMPAT }}
           fail-on-cache-miss: true
 
       # The LLVM install exposes lld through multiple frontend names. The cached
@@ -287,7 +291,7 @@ jobs:
           test -x "$OPENXECHAIN_SYSROOT/bin/synthxex"
           test -s "$OPENXECHAIN_SYSROOT/lib/xecorelib.a"
           "$OPENXECHAIN_SYSROOT/bin/clang" --version
-          "$OPENXECHAIN_SYSROOT/bin/llvm-dlltool" --version
+          "$OPENXECHAIN_SYSROOT/bin/llvm-ar" --version
           du -sh "$OPENXECHAIN_SYSROOT"
 
       - name: Save finished OpenXeChain toolchain
