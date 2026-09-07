@@ -207,6 +207,31 @@ jobs:
           key: echocore-openxechain-llvm-stage-${{ env.ECHO_TOOLCHAIN_CACHE_VERSION }}-${{ runner.os }}-${{ env.OPENXECHAIN_BUILD_SHA }}-cmake-3.31.10-${{ hashFiles('echocore/openxechain/build-minimal-toolchain-fast.sh') }}
           fail-on-cache-miss: true
 
+      # The LLVM install exposes lld through multiple frontend names. The cached
+      # sysroot occasionally restores the lld-link alias as missing/broken even
+      # though the actual lld binary is intact. Repair only the frontend alias so
+      # we can reuse the expensive LLVM checkpoint instead of rebuilding it.
+      - name: Repair lld-link frontend after cache restore
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euxo pipefail
+          echo "=== LLD frontends after cache restore ==="
+          ls -la "$OPENXECHAIN_SYSROOT/bin"/lld* || true
+
+          if [ ! -x "$OPENXECHAIN_SYSROOT/bin/lld-link" ]; then
+            if [ -x "$OPENXECHAIN_SYSROOT/bin/lld" ]; then
+              ln -sfn lld "$OPENXECHAIN_SYSROOT/bin/lld-link"
+            elif [ -x "$OPENXECHAIN_SYSROOT/bin/ld.lld" ]; then
+              ln -sfn ld.lld "$OPENXECHAIN_SYSROOT/bin/lld-link"
+            else
+              echo "Cannot repair lld-link: neither lld nor ld.lld is available" >&2
+              exit 1
+            fi
+          fi
+
+          test -x "$OPENXECHAIN_SYSROOT/bin/lld-link"
+          "$OPENXECHAIN_SYSROOT/bin/lld-link" --version
+
       - name: Install finalization dependencies
         if: steps.toolchain-cache.outputs.cache-hit != 'true'
         run: |
