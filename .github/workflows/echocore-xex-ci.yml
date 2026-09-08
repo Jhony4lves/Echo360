@@ -349,13 +349,17 @@ jobs:
 
       - name: Write physical-test manifest
         run: |
+          cp docs/ECHOCORE_RESIDENT_R2.md /tmp/EchoCore-Resident-R2.md
+          cp tools/echolink_ping.py /tmp/echolink_ping.py
           cat > /tmp/EchoCore-HARDWARE-README.txt <<'EOF_MANIFEST'
-          EchoCore hardware candidate
+          EchoCore Resident R2 hardware candidate
 
           Included:
           - EchoCorePairing.xex   : local pairing-token display/recovery
           - EchoCoreResident.xex  : resident authenticated LAN service
           - EchoCoreLoader.xex    : NOVA-launchable loader for the sibling resident
+          - EchoCore-Resident-R2.md : corrected startup, tests and hardware steps
+          - echolink_ping.py     : independent EchoLink PING/PONG probe
 
           Deliberately NOT included:
           - legacy EchoCore.xex bootstrap. Physical Corona/RGH testing proved that
@@ -364,6 +368,8 @@ jobs:
 
           First hardware pass remains reversible: Pairing + Loader + Resident only.
           Do not install a DashLaunch boot plugin yet.
+          Keep the existing pairing.dat. A loaded older resident needs a normal
+          restart before replacement bytes can take effect; never hot-unload it.
           EOF_MANIFEST
 
       - name: Upload EchoCore hardware-candidate bundle
@@ -375,5 +381,7 @@ jobs:
             /tmp/echocore-resident-build/EchoCoreResident.xex
             /tmp/echocore-loader-build/EchoCoreLoader.xex
             /tmp/EchoCore-HARDWARE-README.txt
+            /tmp/EchoCore-Resident-R2.md
+            /tmp/echolink_ping.py
           if-no-files-found: error
           retention-days: 30

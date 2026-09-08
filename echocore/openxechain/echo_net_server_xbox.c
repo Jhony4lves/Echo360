@@ -3,6 +3,7 @@
 
 #include "echo_net_server_xbox.h"
 #include "echo_session_engine_xbox.h"
+#include "echo_xnet_abi.h"
 
 #define ECHO_XNCALLER_SYSAPP 2U
 #define ECHO_AF_INET 2U
@@ -65,10 +66,12 @@ static void echo_net_delay_ms(uint32_t milliseconds) {
 static int echo_net_recv_exact(
     uint32_t socket_handle,
     uint8_t *buffer,
-    uint32_t length
+    uint32_t length,
+    volatile uint32_t *stop_requested
 ) {
     uint32_t total = 0U;
     while (total < length) {
+        if (echo_net_stop_requested(stop_requested)) return ECHO_NET_STOPPED;
         int received = NetDll_recv(
             ECHO_XNCALLER_SYSAPP,
             socket_handle,
@@ -86,10 +89,12 @@ static int echo_net_recv_exact(
 static int echo_net_send_exact(
     uint32_t socket_handle,
     const uint8_t *buffer,
-    uint32_t length
+    uint32_t length,
+    volatile uint32_t *stop_requested
 ) {
     uint32_t total = 0U;
     while (total < length) {
+        if (echo_net_stop_requested(stop_requested)) return ECHO_NET_STOPPED;
         int sent = NetDll_send(
             ECHO_XNCALLER_SYSAPP,
             socket_handle,
@@ -106,7 +111,8 @@ static int echo_net_send_exact(
 static int echo_net_send_response(
     uint32_t client_socket,
     uint32_t request_id,
-    const echo_readonly_xbox_response *response
+    const echo_readonly_xbox_response *response,
+    volatile uint32_t *stop_requested
 ) {
     uint8_t header[ECHO_HEADER_BYTES];
     int result;
@@ -124,13 +130,14 @@ static int echo_net_send_response(
         response->payload_length,
         request_id
     );
-    result = echo_net_send_exact(client_socket, header, ECHO_HEADER_BYTES);
+    result = echo_net_send_exact(client_socket, header, ECHO_HEADER_BYTES, stop_requested);
     if (result != ECHO_NET_OK) return result;
     if (response->payload_length == 0U) return ECHO_NET_OK;
     return echo_net_send_exact(
         client_socket,
         response->payload,
-        response->payload_length
+        response->payload_length,
+        stop_requested
     );
 }
 
@@ -169,7 +176,7 @@ int echo_xbox_serve_paired_client(
         }
         frame_count++;
 
-        result = echo_net_recv_exact(client_socket, raw_header, ECHO_HEADER_BYTES);
+        result = echo_net_recv_exact(client_socket, raw_header, ECHO_HEADER_BYTES, stop_requested);
         if (result != ECHO_NET_OK) {
             echo_xbox_session_reset(&session);
             return result;
@@ -184,13 +191,19 @@ int echo_xbox_serve_paired_client(
             result = echo_net_recv_exact(
                 client_socket,
                 rx_buffer,
-                request.payload_length
+                request.payload_length,
+                stop_requested
             );
             if (result != ECHO_NET_OK) {
                 echo_xbox_session_reset(&session);
                 return result;
             }
             payload = rx_buffer;
+        }
+
+        if (echo_net_stop_requested(stop_requested)) {
+            echo_xbox_session_reset(&session);
+            return ECHO_NET_STOPPED;
         }
 
         response.response_type = 0U;
@@ -211,7 +224,8 @@ int echo_xbox_serve_paired_client(
             result = echo_net_send_response(
                 client_socket,
                 request.request_id,
-                &response
+                &response,
+                stop_requested
             );
             if (result != ECHO_NET_OK) {
                 echo_xbox_session_reset(&session);
@@ -229,9 +243,29 @@ int echo_xbox_serve_paired_client(
     return ECHO_NET_STOPPED;
 }
 
+static int echo_net_configure_lan_socket(uint32_t socket_handle) {
+    uint32_t enabled = 1U;
+
+    /* XNCALLER_SYSAPP selects socket lifetime, not the LAN security mode.
+     * Reuse the hardware bootstrap's policy for ordinary phone/PC TCP peers. */
+    if (NetDll_setsockopt(ECHO_XNCALLER_SYSAPP, socket_handle, ECHO_SOL_SOCKET,
+                         ECHO_XNET_SO_INSECURE, &enabled, sizeof(enabled)) != 0) {
+        return ECHO_NET_LAN_ERROR;
+    }
+    /* 0x5802 is not supported by every stack; 0x5801 remains mandatory. */
+    (void)NetDll_setsockopt(ECHO_XNCALLER_SYSAPP, socket_handle, ECHO_SOL_SOCKET,
+                          ECHO_XNET_SO_BYPASS_ENCRYPTION, &enabled, sizeof(enabled));
+    return ECHO_NET_OK;
+}
+
 static int echo_net_configure_client(uint32_t client_socket) {
     uint32_t blocking = 0U;
     uint32_t timeout = ECHO_SERVER_SOCKET_TIMEOUT_MS;
+
+    /* Do not assume accepted sockets inherit every developer socket option. */
+    if (echo_net_configure_lan_socket(client_socket) != ECHO_NET_OK) {
+        return ECHO_NET_LAN_ERROR;
+    }
 
     if (NetDll_ioctlsocket(
             ECHO_XNCALLER_SYSAPP,
@@ -266,11 +300,13 @@ static int echo_net_configure_client(uint32_t client_socket) {
 
 int echo_xbox_run_paired_readonly_server(
     const uint8_t secret[ECHO_AUTH_SECRET_BYTES],
-    volatile uint32_t *stop_requested
+    volatile uint32_t *stop_requested,
+    echo_net_ready_callback on_ready
 ) {
     uint8_t wsa_data[0x200];
     uint8_t listen_address[16];
     uint8_t peer_address[16];
+    echo_xnet_startup_params xnet_params;
     uint32_t server = ECHO_INVALID_SOCKET;
     uint32_t reuse_address = 1U;
     uint32_t nonblocking = 1U;
@@ -285,19 +321,27 @@ int echo_xbox_run_paired_readonly_server(
     echo_net_zero(peer_address, sizeof(peer_address));
     echo_net_zero(g_echo_server_rx, sizeof(g_echo_server_rx));
     echo_net_zero(g_echo_server_tx, sizeof(g_echo_server_tx));
+    echo_xnet_prepare_startup(&xnet_params);
 
     listen_address[0] = 0U;
     listen_address[1] = ECHO_AF_INET;
     listen_address[2] = (uint8_t)(ECHO_SERVER_PORT >> 8U);
     listen_address[3] = (uint8_t)ECHO_SERVER_PORT;
 
-    if (NetDll_XNetStartup(ECHO_XNCALLER_SYSAPP, NULL) != 0) goto cleanup;
+    final_result = ECHO_NET_XNET_ERROR;
+    if (NetDll_XNetStartup(ECHO_XNCALLER_SYSAPP, &xnet_params) != 0) goto cleanup;
     xnet_started = 1;
+    final_result = ECHO_NET_WSA_ERROR;
     if (NetDll_WSAStartup(ECHO_XNCALLER_SYSAPP, 0x0202U, wsa_data) != 0) goto cleanup;
     wsa_started = 1;
 
+    final_result = ECHO_NET_SOCKET_ERROR;
     server = NetDll_socket(ECHO_XNCALLER_SYSAPP, ECHO_AF_INET, ECHO_SOCK_STREAM, 0U);
     if (server == ECHO_INVALID_SOCKET) goto cleanup;
+
+    final_result = echo_net_configure_lan_socket(server);
+    if (final_result != ECHO_NET_OK) goto cleanup;
+    final_result = ECHO_NET_STARTUP_ERROR;
 
     if (NetDll_setsockopt(
             ECHO_XNCALLER_SYSAPP,
@@ -308,13 +352,16 @@ int echo_xbox_run_paired_readonly_server(
             sizeof(reuse_address)
         ) != 0) goto cleanup;
 
+    final_result = ECHO_NET_BIND_ERROR;
     if (NetDll_bind(
             ECHO_XNCALLER_SYSAPP,
             server,
             listen_address,
             sizeof(listen_address)
         ) != 0) goto cleanup;
+    final_result = ECHO_NET_LISTEN_ERROR;
     if (NetDll_listen(ECHO_XNCALLER_SYSAPP, server, 1) != 0) goto cleanup;
+    final_result = ECHO_NET_IO_ERROR;
     if (NetDll_ioctlsocket(
             ECHO_XNCALLER_SYSAPP,
             server,
@@ -323,6 +370,7 @@ int echo_xbox_run_paired_readonly_server(
         ) != 0) goto cleanup;
 
     final_result = ECHO_NET_OK;
+    if (!echo_net_stop_requested(stop_requested) && on_ready != NULL) on_ready();
     while (!echo_net_stop_requested(stop_requested)) {
         uint32_t peer_address_length = sizeof(peer_address);
         uint32_t client = NetDll_accept(

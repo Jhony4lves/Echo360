@@ -153,13 +153,15 @@ void _start(void) {
 
     query_status = XexGetModuleHandle(ECHO_RESIDENT_MODULE_NAME, &existing);
     if (echo_loader_nt_success(query_status) && existing != (echo_hmodule)0) {
-        echo_loader_notify("EchoCore: Resident ja ativo");
+        /* A module handle proves loading only, not pairing/listener health. */
+        echo_loader_notify("EchoCore: modulo ja carregado; verifique no app");
         echo_loader_delay_ms(1200U);
         echo_loader_exit_title();
     }
 
     g_echo_loader_status = ECHO_LOADER_STATUS_PENDING;
     g_echo_loader_module = (echo_hmodule)0;
+    echo_loader_notify("EchoCore Loader R2: carregando modulo");
 
     thread_status = ExCreateThread(
         &thread_handle,
@@ -187,7 +189,7 @@ void _start(void) {
     if (g_echo_loader_status != ECHO_LOADER_STATUS_PENDING &&
         echo_loader_nt_success(g_echo_loader_status) &&
         g_echo_loader_module != (echo_hmodule)0) {
-        echo_loader_notify("EchoCore: Resident carregado");
+        echo_loader_notify("EchoCore: modulo carregado; verifique no app");
     } else {
         echo_loader_notify("EchoCore Loader: load FAIL");
     }

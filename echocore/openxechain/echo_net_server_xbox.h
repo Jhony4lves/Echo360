@@ -21,6 +21,14 @@
 #define ECHO_NET_SESSION_ERROR -4
 #define ECHO_NET_FRAME_LIMIT -5
 #define ECHO_NET_STARTUP_ERROR -6
+#define ECHO_NET_XNET_ERROR -7
+#define ECHO_NET_WSA_ERROR -8
+#define ECHO_NET_SOCKET_ERROR -9
+#define ECHO_NET_LAN_ERROR -10
+#define ECHO_NET_BIND_ERROR -11
+#define ECHO_NET_LISTEN_ERROR -12
+
+typedef void (*echo_net_ready_callback)(void);
 
 /*
  * Serve one already-accepted blocking client. rx/tx buffers are caller-owned
@@ -41,10 +49,13 @@ int echo_xbox_serve_paired_client(
  * Run one SYSAPP listener on TCP/36000 until *stop_requested becomes nonzero.
  * Only one client is served at a time in v1; every accepted client gets a fresh
  * connection-local authentication state.
+ * on_ready is optional and runs on the worker only after bind/listen and all
+ * required socket configuration succeed. It is not a proof of remote pairing.
  */
 int echo_xbox_run_paired_readonly_server(
     const uint8_t secret[ECHO_AUTH_SECRET_BYTES],
-    volatile uint32_t *stop_requested
+    volatile uint32_t *stop_requested,
+    echo_net_ready_callback on_ready
 );
 
 #endif
