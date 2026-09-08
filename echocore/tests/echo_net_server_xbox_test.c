@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "../openxechain/echo_session_protocol.h"
+#include "../openxechain/echo_xnet_abi.h"
 #include "../openxechain/echo_net_server_xbox.c"
 
 static uint8_t g_input[256];
@@ -25,6 +26,13 @@ static int g_bind_result;
 static int g_listen_result;
 static int g_setsockopt_result;
 static int g_ioctl_result;
+static uint32_t g_lan_socket;
+static uint32_t g_lan_calls;
+static uint32_t g_bypass_calls;
+static uint32_t g_failed_option;
+static int g_xnet_start_result;
+static int g_wsa_start_result;
+static volatile uint32_t *g_stop_during_io;
 
 int echo_xbox_session_process_frame(
     const uint8_t secret[ECHO_AUTH_SECRET_BYTES],
@@ -68,10 +76,16 @@ void echo_xbox_session_reset(echo_xbox_session *session) {
 }
 
 int NetDll_XNetStartup(uint32_t caller, void *params) {
-    (void)params;
+    const echo_xnet_startup_params *startup = params;
+    assert(caller == ECHO_XNCALLER_SYSAPP);
+    assert(startup != NULL);
+    assert(startup->cfg_size_of_struct == 13U);
+    assert(startup->cfg_flags == ECHO_XNET_STARTUP_BYPASS_SECURITY);
+    assert(startup->cfg_sock_default_recv_bufsize_in_k == 64U);
+    assert(startup->cfg_sock_default_send_bufsize_in_k == 64U);
     g_last_caller = caller;
     g_xnet_start_calls++;
-    return 0;
+    return g_xnet_start_result;
 }
 
 int NetDll_XNetCleanup(uint32_t caller, void *params) {
@@ -82,11 +96,12 @@ int NetDll_XNetCleanup(uint32_t caller, void *params) {
 }
 
 int NetDll_WSAStartup(uint32_t caller, uint16_t version, void *data) {
-    (void)version;
-    (void)data;
+    assert(caller == ECHO_XNCALLER_SYSAPP);
+    assert(version == 0x0202U);
+    assert(data != NULL);
     g_last_caller = caller;
     g_wsa_start_calls++;
-    return 0;
+    return g_wsa_start_result;
 }
 
 int NetDll_WSACleanup(uint32_t caller) {
@@ -118,12 +133,20 @@ int NetDll_setsockopt(
     const void *option_value,
     uint32_t option_length
 ) {
-    (void)socket_handle;
-    (void)level;
-    (void)option_name;
-    (void)option_value;
-    (void)option_length;
+    assert(caller == ECHO_XNCALLER_SYSAPP);
+    assert(level == ECHO_SOL_SOCKET);
+    assert(option_length == sizeof(uint32_t));
+    assert(option_value != NULL);
+    if (option_name == ECHO_XNET_SO_INSECURE) {
+        assert(*(const uint32_t *)option_value == 1U);
+        g_lan_socket = socket_handle;
+        g_lan_calls++;
+    } else if (option_name == ECHO_XNET_SO_BYPASS_ENCRYPTION) {
+        assert(*(const uint32_t *)option_value == 1U);
+        g_bypass_calls++;
+    }
     g_last_caller = caller;
+    if (option_name == g_failed_option) return -1;
     return g_setsockopt_result;
 }
 
@@ -141,9 +164,12 @@ int NetDll_ioctlsocket(
 }
 
 int NetDll_bind(uint32_t caller, uint32_t socket_handle, const void *name, uint32_t name_length) {
-    (void)socket_handle;
-    (void)name;
-    (void)name_length;
+    const uint8_t *address = name;
+    assert(socket_handle == g_lan_socket);
+    assert(g_lan_calls > 0U);
+    assert(name_length == 16U);
+    assert(address[0] == 0U && address[1] == 2U);
+    assert(address[2] == 0x8CU && address[3] == 0xA0U);
     g_last_caller = caller;
     return g_bind_result;
 }
@@ -175,6 +201,7 @@ int NetDll_recv(uint32_t caller, uint32_t socket_handle, void *buffer, uint32_t 
     if (amount > g_recv_chunk) amount = g_recv_chunk;
     memcpy(buffer, g_input + g_input_offset, amount);
     g_input_offset += amount;
+    if (g_stop_during_io != NULL) *g_stop_during_io = 1U;
     return (int)amount;
 }
 
@@ -187,6 +214,7 @@ int NetDll_send(uint32_t caller, uint32_t socket_handle, const void *buffer, uin
     assert(g_output_length + amount <= sizeof(g_output));
     memcpy(g_output + g_output_length, buffer, amount);
     g_output_length += amount;
+    if (g_stop_during_io != NULL) *g_stop_during_io = 1U;
     return (int)amount;
 }
 
@@ -209,6 +237,7 @@ static void reset_io(void) {
     g_session_calls = 0U;
     g_recv_chunk = 3U;
     g_send_chunk = 2U;
+    g_stop_during_io = NULL;
 }
 
 static void append_frame(
@@ -349,12 +378,15 @@ static void test_invalid_buffer_contract(void) {
     ) == ECHO_NET_INVALID_ARGUMENT);
 }
 
-static void test_listener_uses_sysapp_and_cleans_up(void) {
-    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
-    volatile uint32_t stop = 1U;
-    int result;
+static uint32_t g_ready_calls;
+static volatile uint32_t g_listener_stop;
 
-    make_secret(secret);
+static void stop_ready_listener(void) {
+    g_ready_calls++;
+    g_listener_stop = 1U;
+}
+
+static void reset_listener(void) {
     g_xnet_start_calls = 0U;
     g_wsa_start_calls = 0U;
     g_xnet_cleanup_calls = 0U;
@@ -365,8 +397,24 @@ static void test_listener_uses_sysapp_and_cleans_up(void) {
     g_setsockopt_result = 0;
     g_ioctl_result = 0;
     g_socket_value = 55U;
+    g_lan_socket = 0U;
+    g_lan_calls = 0U;
+    g_bypass_calls = 0U;
+    g_failed_option = 0U;
+    g_xnet_start_result = 0;
+    g_wsa_start_result = 0;
+    g_ready_calls = 0U;
+    g_listener_stop = 0U;
+}
 
-    result = echo_xbox_run_paired_readonly_server(secret, &stop);
+static void test_listener_uses_sysapp_lan_policy_and_cleans_up(void) {
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
+    int result;
+
+    make_secret(secret);
+    reset_listener();
+
+    result = echo_xbox_run_paired_readonly_server(secret, &g_listener_stop, stop_ready_listener);
     assert(result == ECHO_NET_STOPPED);
     assert(g_last_caller == ECHO_XNCALLER_SYSAPP);
     assert(g_xnet_start_calls == 1U);
@@ -374,6 +422,83 @@ static void test_listener_uses_sysapp_and_cleans_up(void) {
     assert(g_wsa_cleanup_calls == 1U);
     assert(g_xnet_cleanup_calls == 1U);
     assert(g_close_calls == 1U);
+    assert(g_lan_calls == 1U && g_bypass_calls == 1U);
+    assert(g_ready_calls == 1U);
+}
+
+static void test_optional_bypass_failure_does_not_block_lan(void) {
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
+    make_secret(secret);
+    reset_listener();
+    g_failed_option = ECHO_XNET_SO_BYPASS_ENCRYPTION;
+    assert(echo_xbox_run_paired_readonly_server(secret, &g_listener_stop, stop_ready_listener)
+           == ECHO_NET_STOPPED);
+    assert(g_ready_calls == 1U);
+    assert(g_lan_calls == 1U && g_bypass_calls == 1U);
+}
+
+static void test_required_startup_failures_never_report_ready(void) {
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
+    uint32_t scenario;
+    static const int expected[] = {
+        ECHO_NET_XNET_ERROR, ECHO_NET_WSA_ERROR, ECHO_NET_SOCKET_ERROR,
+        ECHO_NET_LAN_ERROR, ECHO_NET_BIND_ERROR, ECHO_NET_LISTEN_ERROR, ECHO_NET_IO_ERROR
+    };
+    make_secret(secret);
+    for (scenario = 0U; scenario < sizeof(expected) / sizeof(expected[0]); ++scenario) {
+        reset_listener();
+        switch (scenario) {
+            case 0U: g_xnet_start_result = -1; break;
+            case 1U: g_wsa_start_result = -1; break;
+            case 2U: g_socket_value = ECHO_INVALID_SOCKET; break;
+            case 3U: g_failed_option = ECHO_XNET_SO_INSECURE; break;
+            case 4U: g_bind_result = -1; break;
+            case 5U: g_listen_result = -1; break;
+            case 6U: g_ioctl_result = -1; break;
+        }
+        assert(echo_xbox_run_paired_readonly_server(secret, &g_listener_stop, stop_ready_listener)
+               == expected[scenario]);
+        assert(g_ready_calls == 0U);
+        assert(g_close_calls == (scenario >= 3U ? 1U : 0U));
+        assert(g_wsa_cleanup_calls == (scenario >= 2U ? 1U : 0U));
+        assert(g_xnet_cleanup_calls == (scenario >= 1U ? 1U : 0U));
+    }
+}
+
+static void test_accepted_socket_gets_lan_policy_and_timeouts(void) {
+    reset_listener();
+    assert(echo_net_configure_client(123U) == ECHO_NET_OK);
+    assert(g_lan_socket == 123U);
+    assert(g_lan_calls == 1U && g_bypass_calls == 1U);
+    g_failed_option = ECHO_XNET_SO_INSECURE;
+    assert(echo_net_configure_client(124U) == ECHO_NET_LAN_ERROR);
+}
+
+static void test_stop_interrupts_fragmented_receive(void) {
+    uint8_t secret[ECHO_AUTH_SECRET_BYTES];
+    uint8_t nonce[ECHO_PING_PAYLOAD_BYTES] = {1U};
+    volatile uint32_t stop = 0U;
+    reset_io();
+    make_secret(secret);
+    append_frame(ECHO_TYPE_PING, 0U, 1U, nonce, sizeof(nonce));
+    g_recv_chunk = 1U;
+    g_stop_during_io = &stop;
+    assert(echo_xbox_serve_paired_client(123U, secret, g_rx, sizeof(g_rx),
+                                       g_tx, sizeof(g_tx), &stop) == ECHO_NET_STOPPED);
+    assert(g_input_offset == 1U);
+    assert(g_session_calls == 0U && g_output_length == 0U);
+    g_stop_during_io = NULL;
+}
+
+static void test_stop_interrupts_fragmented_send(void) {
+    uint8_t payload[16] = {1U};
+    volatile uint32_t stop = 0U;
+    reset_io();
+    g_send_chunk = 1U;
+    g_stop_during_io = &stop;
+    assert(echo_net_send_exact(123U, payload, sizeof(payload), &stop) == ECHO_NET_STOPPED);
+    assert(g_output_length == 1U);
+    g_stop_during_io = NULL;
 }
 
 int main(void) {
@@ -383,7 +508,12 @@ int main(void) {
     test_denied_session_response_is_sent_then_connection_closed();
     test_pre_requested_stop_reads_nothing();
     test_invalid_buffer_contract();
-    test_listener_uses_sysapp_and_cleans_up();
+    test_listener_uses_sysapp_lan_policy_and_cleans_up();
+    test_optional_bypass_failure_does_not_block_lan();
+    test_required_startup_failures_never_report_ready();
+    test_accepted_socket_gets_lan_policy_and_timeouts();
+    test_stop_interrupts_fragmented_receive();
+    test_stop_interrupts_fragmented_send();
     puts("EchoCore resident Xbox transport tests: OK");
     return 0;
 }

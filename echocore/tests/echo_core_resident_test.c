@@ -23,6 +23,20 @@ static void *g_last_start_context;
 static uint8_t g_pairing_secret[ECHO_AUTH_SECRET_BYTES];
 static uint8_t g_server_secret[ECHO_AUTH_SECRET_BYTES];
 static volatile uint32_t *g_server_stop_ptr;
+static uint32_t g_notice_calls;
+static char g_last_notice[64];
+
+void XNotifyQueueUI(uint32_t type, uint32_t user, uint32_t priority,
+                    const uint16_t *text, uint64_t parameter) {
+    uint32_t i = 0U;
+    assert(type == 34U && user == 0xFFU && priority == 1U && parameter == 0U);
+    while (text[i] != 0U && i + 1U < sizeof(g_last_notice)) {
+        g_last_notice[i] = (char)text[i];
+        ++i;
+    }
+    g_last_notice[i] = '\0';
+    g_notice_calls++;
+}
 
 int ExCreateThread(
     uint32_t *handle_ptr,
@@ -76,11 +90,14 @@ int echo_pairing_xbox_load_secret(uint8_t secret_out[ECHO_AUTH_SECRET_BYTES]) {
 
 int echo_xbox_run_paired_readonly_server(
     const uint8_t secret[ECHO_AUTH_SECRET_BYTES],
-    volatile uint32_t *stop_requested
+    volatile uint32_t *stop_requested,
+    echo_net_ready_callback on_ready
 ) {
     g_server_calls++;
     memcpy(g_server_secret, secret, ECHO_AUTH_SECRET_BYTES);
     g_server_stop_ptr = stop_requested;
+    assert(on_ready != NULL);
+    if (g_server_status == ECHO_NET_STOPPED) on_ready();
     return g_server_status;
 }
 
@@ -107,6 +124,8 @@ static void reset_fixture(void) {
     g_last_start_address = NULL;
     g_last_start_context = (void *)(uintptr_t)1U;
     g_server_stop_ptr = NULL;
+    g_notice_calls = 0U;
+    memset(g_last_notice, 0, sizeof(g_last_notice));
     memset(g_pairing_secret, 0, sizeof(g_pairing_secret));
     memset(g_server_secret, 0, sizeof(g_server_secret));
     for (i = 0U; i < ECHO_AUTH_SECRET_BYTES; ++i) {
@@ -138,6 +157,7 @@ static void test_attach_creates_one_raw_system_thread(void) {
     assert(g_last_start_address != NULL);
     assert(g_echo_resident_thread_handle == UINT32_C(0x51515151));
     assert(g_echo_resident_stop_requested == 0U);
+    assert(g_notice_calls == 0U);
 
     assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
     assert(g_create_calls == 1U);
@@ -161,6 +181,7 @@ static void test_missing_pairing_never_starts_listener(void) {
     run_captured_worker();
     assert(g_pairing_calls == 1U);
     assert(g_server_calls == 0U);
+    assert(strstr(g_last_notice, "pairing.dat nao encontrado") != NULL);
     assert(g_echo_resident_last_pairing_status == ECHO_PAIRING_STORE_NOT_FOUND);
     assert(g_echo_resident_worker_running == 0U);
     assert(bytes_are_zero(g_echo_resident_secret, sizeof(g_echo_resident_secret)));
@@ -178,6 +199,7 @@ static void test_valid_pairing_reaches_server_then_secret_is_wiped(void) {
     assert(g_server_stop_ptr == &g_echo_resident_stop_requested);
     assert(g_echo_resident_last_pairing_status == ECHO_PAIRING_STORE_OK);
     assert(g_echo_resident_last_server_status == ECHO_NET_IO_ERROR);
+    assert(strstr(g_last_notice, "rede FAIL") != NULL);
     assert(bytes_are_zero(g_echo_resident_secret, sizeof(g_echo_resident_secret)));
 }
 
@@ -188,6 +210,7 @@ static void test_pre_requested_stop_skips_pairing_and_server(void) {
     run_captured_worker();
     assert(g_pairing_calls == 0U);
     assert(g_server_calls == 0U);
+    assert(g_notice_calls == 0U);
     assert(bytes_are_zero(g_echo_resident_secret, sizeof(g_echo_resident_secret)));
 }
 
@@ -215,6 +238,23 @@ static void test_thread_notifications_are_noops(void) {
     assert(g_wait_calls == 0U);
 }
 
+static void test_ready_and_failed_startup_have_different_notices(void) {
+    reset_fixture();
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    g_pairing_status = ECHO_PAIRING_STORE_OK;
+    run_captured_worker();
+    assert(g_notice_calls == 1U);
+    assert(strstr(g_last_notice, "ouvindo na porta 36000") != NULL);
+
+    reset_fixture();
+    assert(echo_test_resident_entry(NULL, ECHO_DLL_PROCESS_ATTACH, NULL) == 1);
+    g_pairing_status = ECHO_PAIRING_STORE_OK;
+    g_server_status = ECHO_NET_LAN_ERROR;
+    run_captured_worker();
+    assert(g_notice_calls == 1U);
+    assert(strstr(g_last_notice, "LAN 5801 FAIL") != NULL);
+}
+
 int main(void) {
     test_attach_creates_one_raw_system_thread();
     test_thread_creation_failure_fails_attach_closed();
@@ -223,6 +263,7 @@ int main(void) {
     test_pre_requested_stop_skips_pairing_and_server();
     test_detach_requests_stop_joins_closes_and_wipes();
     test_thread_notifications_are_noops();
+    test_ready_and_failed_startup_have_different_notices();
     puts("EchoCore resident plugin lifecycle tests: OK");
     return 0;
 }

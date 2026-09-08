@@ -45,6 +45,8 @@ extern int NtWaitForSingleObjectEx(
     int64_t *timeout_ptr
 );
 extern int NtClose(uint32_t handle);
+extern void XNotifyQueueUI(uint32_t type, uint32_t user, uint32_t priority,
+                           const uint16_t *text, uint64_t parameter);
 
 static volatile uint32_t g_echo_resident_stop_requested = 1U;
 static volatile uint32_t g_echo_resident_worker_running = 0U;
@@ -52,6 +54,7 @@ static uint32_t g_echo_resident_thread_handle = ECHO_RESIDENT_THREAD_HANDLE_NONE
 static uint8_t g_echo_resident_secret[ECHO_AUTH_SECRET_BYTES];
 static int g_echo_resident_last_pairing_status = ECHO_PAIRING_STORE_NOT_FOUND;
 static int g_echo_resident_last_server_status = ECHO_NET_STOPPED;
+static uint16_t g_echo_resident_notice[64];
 
 /* SynthXEX v0.0.5 needs raw data in the final PE section for RVA mapping. */
 static volatile uint32_t g_echo_synthxex_data_anchor = UINT32_C(0x4543484F);
@@ -61,6 +64,34 @@ static void echo_resident_secure_zero(void *buffer, size_t length) {
     size_t i;
     if (buffer == NULL) return;
     for (i = 0U; i < length; ++i) bytes[i] = 0U;
+}
+
+/* Only the worker calls UI services; DLL attach/detach remain free of UI I/O.
+ * Status messages never include the token, pairing bytes or console secrets. */
+static void echo_resident_notify(const char *text) {
+    uint32_t i = 0U;
+    while (text[i] != '\0' && i + 1U < 64U) {
+        g_echo_resident_notice[i] = (uint16_t)(uint8_t)text[i];
+        ++i;
+    }
+    g_echo_resident_notice[i] = 0U;
+    XNotifyQueueUI(34U, 0xFFU, 1U, g_echo_resident_notice, UINT64_C(0));
+}
+
+static void echo_resident_listener_ready(void) {
+    echo_resident_notify("EchoCore R2: ouvindo na porta 36000");
+}
+
+static const char *echo_resident_network_error(int status) {
+    switch (status) {
+        case ECHO_NET_XNET_ERROR: return "EchoCore R2: XNet FAIL";
+        case ECHO_NET_WSA_ERROR: return "EchoCore R2: WSA FAIL";
+        case ECHO_NET_SOCKET_ERROR: return "EchoCore R2: socket FAIL";
+        case ECHO_NET_LAN_ERROR: return "EchoCore R2: LAN 5801 FAIL";
+        case ECHO_NET_BIND_ERROR: return "EchoCore R2: porta 36000 ocupada/indisponivel";
+        case ECHO_NET_LISTEN_ERROR: return "EchoCore R2: listen FAIL";
+        default: return "EchoCore R2: configuracao de rede FAIL";
+    }
 }
 
 static uint32_t echo_resident_worker(void *context) {
@@ -75,13 +106,25 @@ static uint32_t echo_resident_worker(void *context) {
 
     pairing_status = echo_pairing_xbox_load_secret(g_echo_resident_secret);
     g_echo_resident_last_pairing_status = pairing_status;
-    if (pairing_status != ECHO_PAIRING_STORE_OK) goto done;
+    if (pairing_status != ECHO_PAIRING_STORE_OK) {
+        if (g_echo_resident_stop_requested == 0U) {
+            echo_resident_notify(pairing_status == ECHO_PAIRING_STORE_NOT_FOUND
+                ? "EchoCore R2: pairing.dat nao encontrado no HDD"
+                : "EchoCore R2: falha ao ler/validar pairing.dat");
+        }
+        goto done;
+    }
 
     if (g_echo_resident_stop_requested == 0U) {
         g_echo_resident_last_server_status = echo_xbox_run_paired_readonly_server(
             g_echo_resident_secret,
-            &g_echo_resident_stop_requested
+            &g_echo_resident_stop_requested,
+            echo_resident_listener_ready
         );
+        if (g_echo_resident_last_server_status < 0 &&
+            g_echo_resident_stop_requested == 0U) {
+            echo_resident_notify(echo_resident_network_error(g_echo_resident_last_server_status));
+        }
     }
 
 done:
