@@ -45,23 +45,12 @@ class EchoTransferRepository(
         val localTree = localScanner.scan(localTreeUri)
         val canonicalRoot = XboxPath.canonical(remoteRoot)
 
-        val remoteResult = when (requestedRoute) {
-            FtpRoute.Fast -> scanRemote(profile, localTree, canonicalRoot, FtpRoute.Fast)
-            FtpRoute.Background -> scanRemote(profile, localTree, canonicalRoot, FtpRoute.Background)
-            FtpRoute.Auto -> runCatching {
-                scanRemote(profile, localTree, canonicalRoot, FtpRoute.Fast)
-            }.getOrElse { fastError ->
-                scanRemote(
-                    profile = profile,
-                    localTree = localTree,
-                    canonicalRoot = canonicalRoot,
-                    route = FtpRoute.Background,
-                ).copy(
-                    fallbackReason = fastError.message
-                        ?: "Aurora FTP indisponível durante a análise.",
-                )
-            }
-        }
+        val remoteResult = scanRemote(
+            profile = profile,
+            localTree = localTree,
+            canonicalRoot = canonicalRoot,
+            route = requestedRoute,
+        )
 
         return TransferCompareEngine.compare(
             local = localTree,
@@ -78,9 +67,10 @@ class EchoTransferRepository(
      *
      * The same FTP session is reused while healthy. Transient transport failures
      * are retried on the same route with bounded backoff, restarting the current
-     * file from byte zero. In Auto mode, exhausted Fast retries fall back to
-     * FTPdll Background. Every successful STOR is verified with a remote SIZE.
-     * Every terminal run is persisted in the local transfer history.
+     * file from byte zero. In Auto mode, the fastest healthy provider is selected
+     * and exhausted retries fall back once to the other FTP provider. Every
+     * successful STOR is verified with a remote SIZE. Every terminal run is
+     * persisted in the local transfer history.
      */
     suspend fun execute(
         analysis: TransferAnalysis,
@@ -232,7 +222,7 @@ class EchoTransferRepository(
                 currentFile = item.relativePath
                 if (cancellationToken.isCancelled()) throw TransferCancelledSignal
 
-                var retriedInBackground = false
+                var fallbackAttempted = false
                 var sameRouteRetries = 0
 
                 while (true) {
@@ -311,7 +301,7 @@ class EchoTransferRepository(
                                 item = item,
                                 fileIndex = index + 1,
                                 currentBytes = 0L,
-                                message = "Falha transitória em ${failureRoute.name}. Retry $sameRouteRetries/${retryPolicy.maxSameRouteRetries} em ${waitMs} ms; o arquivo será reiniciado do zero.",
+                                message = "Falha transitória em ${providerLabel(failureRoute)}. Retry $sameRouteRetries/${retryPolicy.maxSameRouteRetries} em ${waitMs} ms; o arquivo será reiniciado do zero.",
                                 force = true,
                             )
                             closeCurrentSession()
@@ -320,23 +310,26 @@ class EchoTransferRepository(
                             continue
                         }
 
+                        val alternateRoute = alternateRoute(failureRoute)
                         val canFallback = transient &&
                             analysis.requestedRoute == FtpRoute.Auto &&
-                            failureRoute == FtpRoute.Fast &&
-                            !retriedInBackground
+                            alternateRoute != null &&
+                            !fallbackAttempted
 
                         if (canFallback) {
-                            retriedInBackground = true
+                            fallbackAttempted = true
                             sameRouteRetries = 0
-                            val reason = error.message ?: "Aurora FTP falhou durante o envio."
-                            fallbackReason = "Fast → Background após retries: $reason"
-                            desiredRoute = FtpRoute.Background
+                            totalRetryCount += 1
+                            val reason = error.message ?: "${providerLabel(failureRoute)} falhou durante o envio."
+                            fallbackReason = "${providerLabel(failureRoute)} → ${providerLabel(checkNotNull(alternateRoute))} após retries: $reason"
+                            desiredRoute = alternateRoute
+                            sessionFactory.invalidateAutoSelection()
                             emit(
                                 status = TransferExecutionStatus.Preparing,
                                 item = item,
                                 fileIndex = index + 1,
                                 currentBytes = 0L,
-                                message = "Fast continuou instável. Mudando para FTPdll e reiniciando o arquivo.",
+                                message = "${providerLabel(failureRoute)} continuou instável. Mudando para ${providerLabel(alternateRoute)} e reiniciando o arquivo.",
                                 force = true,
                             )
                             closeCurrentSession()
@@ -531,6 +524,18 @@ private fun remoteTarget(remoteRoot: String, relativePath: String): String =
     XboxPath.canonical(
         XboxPath.canonical(remoteRoot).trimEnd('/') + "/" + relativePath.replace('\\', '/').trim('/'),
     )
+
+private fun alternateRoute(route: FtpRoute): FtpRoute? = when (route) {
+    FtpRoute.Fast -> FtpRoute.Background
+    FtpRoute.Background -> FtpRoute.Fast
+    FtpRoute.Auto -> null
+}
+
+private fun providerLabel(route: FtpRoute): String = when (route) {
+    FtpRoute.Fast -> "Aurora FTP"
+    FtpRoute.Background -> "FTPdll"
+    FtpRoute.Auto -> "FTP Auto"
+}
 
 private class TransferVerificationException(message: String) : IllegalStateException(message)
 
