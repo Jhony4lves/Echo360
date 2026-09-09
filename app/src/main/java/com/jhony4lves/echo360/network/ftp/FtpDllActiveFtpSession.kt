@@ -70,6 +70,13 @@ class FtpDllActiveFtpSession private constructor(
         }
     }
 
+    override suspend fun delete(canonicalPath: String) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val remote = XboxPath.toFtpDllPath(XboxPath.canonical(canonicalPath))
+            requirePositive(channel.command("DELE $remote"), "FTPdll recusou DELE.")
+        }
+    }
+
     override suspend fun upload(
         canonicalPath: String,
         source: InputStream,
