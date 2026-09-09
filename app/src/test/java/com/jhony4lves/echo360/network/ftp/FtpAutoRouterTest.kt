@@ -5,6 +5,7 @@ import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -121,19 +122,23 @@ class FtpAutoRouterTest {
         assertEquals(first.benchmark, second.benchmark)
     }
 
-    @Test(expected = IOException::class)
-    fun `Auto fails when neither provider is available`() = runBlocking {
-        val router = FtpAutoRouter(
-            benchmarkBytes = 1024,
-            nowMs = { 1_000L },
-            nanoTime = { 0L },
-        )
+    @Test
+    fun `Auto fails when neither provider is available`() {
+        assertThrows(IOException::class.java) {
+            runBlocking {
+                val router = FtpAutoRouter(
+                    benchmarkBytes = 1024,
+                    nowMs = { 1_000L },
+                    nanoTime = { 0L },
+                )
 
-        router.connect(
-            profile = profile,
-            fastConnector = { throw IOException("Aurora offline") },
-            backgroundConnector = { throw IOException("FTPdll offline") },
-        )
+                router.connect(
+                    profile = profile,
+                    fastConnector = { throw IOException("Aurora offline") },
+                    backgroundConnector = { throw IOException("FTPdll offline") },
+                )
+            }
+        }
     }
 
     private class FakeSession(
