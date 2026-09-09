@@ -375,9 +375,10 @@ class FtpTransportIntegrationTest {
                         "PASV" -> {
                             check(mode == Mode.Passive) { "PASV used against active-only fake server." }
                             passiveListener?.close()
-                            passiveListener = ServerSocket(0)
-                            val p = passiveListener.localPort
-                            events += "passive-listen:${passiveListener.localSocketAddress}"
+                            val listener = ServerSocket(0)
+                            passiveListener = listener
+                            val p = listener.localPort
+                            events += "passive-listen:${listener.localSocketAddress}"
                             reply("227 Entering Passive Mode (127,0,0,1,${p / 256},${p % 256})")
                         }
                         "EPSV" -> reply("500 EPSV not supported")
