@@ -19,6 +19,12 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
+/**
+ * Protocol-level coverage for the real transports used by EchoTransfer and
+ * Xbox-resident EchoFix. In particular, prefix RETR must transfer only the
+ * requested STFS header bytes to the client, while RNFR/RNTO must not create a
+ * data-channel transfer at all.
+ */
 class FtpTransportIntegrationTest {
     @Test
     fun `Aurora upload uses passive data channel`() {
