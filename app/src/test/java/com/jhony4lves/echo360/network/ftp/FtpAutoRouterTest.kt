@@ -30,7 +30,6 @@ class FtpAutoRouterTest {
             cacheTtlMs = 60_000L,
             nowMs = { 1_000L },
             nanoTime = { clockNanos },
-            token = { "fixedtoken" },
         )
 
         val routed = router.connect(
@@ -44,6 +43,8 @@ class FtpAutoRouterTest {
         assertFalse(background.closed)
         assertEquals(1, fast.uploadCalls)
         assertEquals(1, background.uploadCalls)
+        assertEquals("/Hdd1/Echo360/.bench/aurora.probe", fast.lastUploadPath)
+        assertEquals("/Hdd1/Echo360/.bench/ftpdll.probe", background.lastUploadPath)
         assertEquals(1, fast.deleteCalls)
         assertEquals(1, background.deleteCalls)
         val benchmark = checkNotNull(routed.benchmark)
@@ -62,7 +63,6 @@ class FtpAutoRouterTest {
             cacheTtlMs = 60_000L,
             nowMs = { 1_000L },
             nanoTime = { clockNanos },
-            token = { "fixedtoken" },
         )
 
         val routed = router.connect(
@@ -88,7 +88,6 @@ class FtpAutoRouterTest {
             cacheTtlMs = 60_000L,
             nowMs = { 1_000L },
             nanoTime = { clockNanos },
-            token = { "fixedtoken" },
         )
 
         suspend fun newFast(): XboxFtpSession {
@@ -146,6 +145,7 @@ class FtpAutoRouterTest {
         var uploadCalls = 0
         var deleteCalls = 0
         var closed = false
+        var lastUploadPath: String? = null
 
         override suspend fun list(canonicalPath: String): List<RemoteEntry> = emptyList()
 
@@ -164,6 +164,7 @@ class FtpAutoRouterTest {
             onProgress: (Long) -> Unit,
         ) {
             uploadCalls += 1
+            lastUploadPath = canonicalPath
             onUpload()
             var total = 0L
             val buffer = ByteArray(256)
