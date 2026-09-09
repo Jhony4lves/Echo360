@@ -122,6 +122,11 @@ class EchoTuScannerTest {
             error("mutation not allowed")
         }
 
+        override suspend fun delete(canonicalPath: String) {
+            mutationCalls += 1
+            error("mutation not allowed")
+        }
+
         override suspend fun upload(
             canonicalPath: String,
             source: InputStream,
