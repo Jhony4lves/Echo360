@@ -1,67 +1,56 @@
 # Echo360
 
-Echo360 is a modern native Android companion, launcher and management platform for Xbox 360 RGH.
+Echo360 is a modern native Android companion, launcher and management platform for Jhony's Xbox 360 RGH.
 
-The original Echo360 Companion prototype has now been superseded by the native Kotlin + Jetpack Compose application for the v1 software scope. Aurora NOVA, Aurora FTP and FTPdll remain compatibility providers while the project advances toward a resident Xbox-side `EchoCore.xex`.
+The active architecture is intentionally external to the Xbox runtime: the Android app talks to Aurora NOVA, Aurora FTP and FTPdll over the local network. The earlier resident EchoCore / EchoLink experiment was retired after real-console testing showed that a resident XEX introduced black-screen and boot/runtime fragility that the project does not need.
 
 ## Vision
 
-Echo360 aims to make an Xbox 360 RGH feel like a living modern platform: a game-first launcher, library, diagnostics, safe transfers, local save protection, remote controls, integrity checks and, through EchoCore, a first-party Xbox-side service.
+Echo360 aims to make an Xbox 360 RGH feel like a living modern platform without making console boot depend on custom resident code: game-first library, diagnostics, safe transfers, repair automation, local save protection, remote controls and integrity checks from external devices.
 
 ## Core pillars
 
 - **EchoHome / EchoLibrary** — game-first launcher, library, artwork, metadata and observed sessions
-- **EchoTransfer** — differential transfers with Fast/Background/Auto routing, retries, verification and history
+- **EchoTransfer** — differential transfers with Aurora/FTPDll Auto routing, retries, verification and history
 - **EchoDoctor / EchoIntegrity** — evidence-first diagnostics for games, runtime state, DashLaunch, storage and Vault hashes
+- **EchoFix** — evidence-first repair recipes for misplaced Xbox content, including installer payloads exposed directly or trapped inside GOD containers
 - **EchoSync / Save Vault** — bounded read-only Xbox → Android snapshots with SHA-256 manifests
 - **EchoStats** — retained observed play-session analytics
-- **EchoRemote** — documented NOVA controls plus restricted Aurora FTP restart/reboot/shutdown actions
+- **EchoRemote** — documented NOVA controls plus restricted remote console actions
 - **EchoTU / EchoMods safety** — read-only TU inventory and a verified rollback gate for future mutation
-- **EchoCore** — resident Xbox 360 service and future first-party EchoLink API
 
-## Status
+## Active connectivity stack
 
-### Android v1: 100% software-complete
-
-Phases 0–5 of the native Android v1 scope are implemented and CI-covered. Open work in those phases is intentionally limited to target-console/device validation or post-v1 mutation/remediation that requires a proven rollback/restore path.
-
-Current compatibility stack:
-
-- EchoLink v1 Android client + portable C reference server
 - Aurora NOVA
-- Aurora passive FTP
-- FTPdll active FTP
+- Aurora passive FTP (`:21`)
+- FTPdll active FTP (`:7564`)
+- Auto routing based on measured transfer throughput with bounded failover
 
-Next system layer:
+No resident EchoCore service is required for the current product architecture.
 
-- physical EchoCore XEX / EchoLink proof on the target Xbox
-- promotion of native read-only EchoCore capabilities after ABI/hardware validation
-- pairing/authentication before privileged EchoCore commands
-- HUD/Boost/Pad/event-driven features after the resident core is proven stable
+## EchoCore / EchoLink status
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phase split and hardware gates.
+The resident EchoCore direction is **retired from active builds and CI**. Historical source, protocol notes and experiments may remain in the repository only as technical reference. They are not part of the Android APK, are not required on the Xbox and must not be treated as the current connectivity plan.
+
+Any future Xbox-side helper must be optional, manually/on-demand invoked first, reversible, and must prove stability on the real console before it can influence the active architecture.
 
 ## Safety principles
 
 - Never commit Xbox credentials or console-unique secrets.
 - Prefer read-only diagnostics before mutation.
 - Never convert unavailable evidence into a corruption or success claim.
-- Back up the exact target before any future automated mutation.
-- Future mod/TU writes must have a verified, complete rollback snapshot that covers the target.
+- Back up the exact target before risky mutation.
+- Never blindly overwrite a different-size game/content target.
 - No arbitrary remote file or FTP command surface from player-facing UI.
-- Hardware validation is required before Xbox-side EchoCore behavior is called proven.
+- Hardware validation is required before console-specific behavior is called proven.
+- Resident/boot-time Xbox code is not a dependency of Echo360.
 
-## Repository layout
+## Repository notes
 
-```text
-app/          Native Android application
-core/         Shared/domain logic as the project evolves
-protocols/    Compatibility and EchoLink protocol material
-xbox/         Xbox-side tools, experiments and EchoCore work
-legacy/       Preserved Companion reference implementation
-docs/         Architecture, contracts and roadmap
-```
+`app/` contains the active Android application. Historical Xbox-side experiments and documentation can remain for reference, but active build/release decisions follow the architecture above.
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## License
 
-No license has been selected yet.
+No project-wide license has been selected yet. Third-party components/references are documented in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
