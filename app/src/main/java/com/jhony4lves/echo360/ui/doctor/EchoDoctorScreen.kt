@@ -57,6 +57,7 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
 
         item { DoctorFullScanSection() }
         item { XboxEchoFixSection() }
+        item { GodInstallerEchoFixSection() }
 
         item {
             Text(
@@ -74,7 +75,7 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
 
         item {
             Text(
-                "EchoFix prioriza arquivos que já estão no Xbox: escaneia, lê somente o header STFS, valida origem/destino e tenta move server-side. A origem Android permanece apenas como alternativa.",
+                "EchoFix prioriza o Xbox: primeiro corrige payloads já expostos com move server-side; quando o instalador está preso em GOD, a receita GOD reconstrói uma XISO temporária no cache do app, extrai somente o conteúdo necessário e mantém o GOD original intacto. A origem Android permanece como alternativa.",
                 style = MaterialTheme.typography.labelMedium,
                 color = EchoColors.TextMuted,
             )
