@@ -1,5 +1,7 @@
 package com.jhony4lves.echo360.domain.fix
 
+import com.jhony4lves.echo360.network.ftp.FtpRoute
+
 data class StfsMetadata(
     val magic: String,
     val contentType: Long,
@@ -24,11 +26,18 @@ data class StfsMetadata(
         }
 }
 
+enum class RepairSourceKind {
+    Android,
+    Xbox,
+}
+
 data class RepairSource(
     val relativePath: String,
     val fileName: String,
     val size: Long,
-    val contentUri: String,
+    val contentUri: String? = null,
+    val remotePath: String? = null,
+    val kind: RepairSourceKind = RepairSourceKind.Android,
 )
 
 enum class RepairSeverity {
@@ -58,6 +67,8 @@ data class RepairPlan(
     val detectedPayloadPath: String? = null,
     val actions: List<RepairAction> = emptyList(),
     val issues: List<RepairIssue> = emptyList(),
+    val sourceKind: RepairSourceKind = RepairSourceKind.Android,
+    val selectedRootPath: String? = null,
 ) {
     val canExecute: Boolean
         get() = actions.isNotEmpty() && issues.none { it.severity == RepairSeverity.Error }
@@ -67,4 +78,74 @@ data class RepairPlan(
 
     val totalBytes: Long
         get() = actions.sumOf { it.source.size }
+}
+
+enum class RemoteRepairState {
+    AlreadyCorrect,
+    Missing,
+    Conflict,
+    SourceMissing,
+}
+
+data class RemoteRepairCheck(
+    val action: RepairAction,
+    val state: RemoteRepairState,
+    val sourceSize: Long?,
+    val destinationSize: Long?,
+)
+
+data class RemoteRepairValidation(
+    val requestedRoute: FtpRoute,
+    val usedRoute: FtpRoute,
+    val checks: List<RemoteRepairCheck>,
+    val fallbackReason: String? = null,
+) {
+    val alreadyCorrectCount: Int
+        get() = checks.count { it.state == RemoteRepairState.AlreadyCorrect }
+
+    val missingCount: Int
+        get() = checks.count { it.state == RemoteRepairState.Missing }
+
+    val conflictCount: Int
+        get() = checks.count { it.state == RemoteRepairState.Conflict }
+
+    val sourceMissingCount: Int
+        get() = checks.count { it.state == RemoteRepairState.SourceMissing }
+
+    val canMove: Boolean
+        get() = checks.isNotEmpty() &&
+            conflictCount == 0 &&
+            sourceMissingCount == 0
+}
+
+enum class RemoteMoveStatus {
+    Moved,
+    AlreadyCorrect,
+    Failed,
+    RolledBack,
+}
+
+data class RemoteMoveResult(
+    val action: RepairAction,
+    val status: RemoteMoveStatus,
+    val route: FtpRoute? = null,
+    val message: String,
+)
+
+data class RemoteRepairExecution(
+    val results: List<RemoteMoveResult>,
+) {
+    val movedCount: Int
+        get() = results.count { it.status == RemoteMoveStatus.Moved }
+
+    val alreadyCorrectCount: Int
+        get() = results.count { it.status == RemoteMoveStatus.AlreadyCorrect }
+
+    val failedCount: Int
+        get() = results.count {
+            it.status == RemoteMoveStatus.Failed || it.status == RemoteMoveStatus.RolledBack
+        }
+
+    val succeeded: Boolean
+        get() = results.isNotEmpty() && failedCount == 0
 }
