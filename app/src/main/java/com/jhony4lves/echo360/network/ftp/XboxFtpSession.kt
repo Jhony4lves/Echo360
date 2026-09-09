@@ -20,6 +20,30 @@ interface XboxFtpSession {
     suspend fun delete(canonicalPath: String)
 
     /**
+     * Reads at most [byteCount] bytes from the beginning of a remote file.
+     *
+     * The production FTP implementations intentionally terminate the FTP
+     * control session after the prefix has been collected. A normal RETR has
+     * no standard "end offset", and closing the short-lived session avoids
+     * downloading a multi-gigabyte package or leaving an ABOR reply sequence
+     * desynchronised. Callers must treat this session as consumed and create a
+     * fresh session for later operations.
+     */
+    suspend fun readPrefixAndClose(
+        canonicalPath: String,
+        byteCount: Int,
+    ): ByteArray = throw UnsupportedOperationException("Leitura parcial não suportada por esta sessão FTP.")
+
+    /**
+     * Renames or moves a file entirely on the Xbox FTP server using RNFR/RNTO.
+     * No file body should cross the LAN when the server supports this command.
+     */
+    suspend fun rename(
+        fromCanonicalPath: String,
+        toCanonicalPath: String,
+    ) = throw UnsupportedOperationException("Rename server-side não suportado por esta sessão FTP.")
+
+    /**
      * Consumes and closes [source]. The callback receives cumulative bytes sent.
      */
     suspend fun upload(
