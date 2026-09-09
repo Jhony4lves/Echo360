@@ -59,7 +59,10 @@ class FtpDllActiveFtpSession private constructor(
             when (reply.code) {
                 213 -> reply.lines.first().substringAfter("213").trim().toLongOrNull()
                 550 -> null
-                else -> throw FtpProtocolException(reply.code, "FTPdll recusou SIZE.")
+                else -> throw FtpProtocolException(
+                    reply.code,
+                    ftpReplyMessage("FTPdll recusou SIZE.", reply),
+                )
             }
         }
     }
@@ -160,7 +163,10 @@ class FtpDllActiveFtpSession private constructor(
             if (cwd.isPositive) continue
 
             if (index == 0) {
-                throw FtpProtocolException(cwd.code, "Drive FTPdll não encontrado: ${segments[index]}.")
+                throw FtpProtocolException(
+                    cwd.code,
+                    ftpReplyMessage("Drive FTPdll não encontrado: ${segments[index]}.", cwd),
+                )
             }
 
             val mkd = channel.command("MKD $currentRemote")
@@ -194,7 +200,7 @@ class FtpDllActiveFtpSession private constructor(
         val reply = channel.command("PORT $argument")
         if (!reply.isPositive) {
             listener.close()
-            throw FtpProtocolException(reply.code, "FTPdll recusou PORT.")
+            throw FtpProtocolException(reply.code, ftpReplyMessage("FTPdll recusou PORT.", reply))
         }
 
         return listener
@@ -229,11 +235,24 @@ private fun canonicalizeRootEntry(entry: RemoteEntry): RemoteEntry {
 }
 
 private fun requirePositive(reply: FtpReply, message: String) {
-    if (!reply.isPositive) throw FtpProtocolException(reply.code, message)
+    if (!reply.isPositive) {
+        throw FtpProtocolException(reply.code, ftpReplyMessage(message, reply))
+    }
 }
 
 private fun requirePreliminary(reply: FtpReply, message: String) {
-    if (!reply.isPreliminary) throw FtpProtocolException(reply.code, message)
+    if (!reply.isPreliminary) {
+        throw FtpProtocolException(reply.code, ftpReplyMessage(message, reply))
+    }
+}
+
+private fun ftpReplyMessage(message: String, reply: FtpReply): String {
+    val detail = reply.lines.firstOrNull()?.trim().orEmpty()
+    return if (detail.isBlank()) {
+        "$message Código FTP ${reply.code}."
+    } else {
+        "$message $detail"
+    }
 }
 
 private fun copyActiveWithProgress(
