@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - "app/**"
-      - "tools/**"
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-ci.yml"
@@ -13,7 +12,6 @@ on:
     branches: [main]
     paths:
       - "app/**"
-      - "tools/**"
       - "*.gradle.kts"
       - "gradle.properties"
       - ".github/workflows/android-ci.yml"
