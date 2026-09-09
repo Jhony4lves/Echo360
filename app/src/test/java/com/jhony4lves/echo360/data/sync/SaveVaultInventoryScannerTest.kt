@@ -108,6 +108,7 @@ class SaveVaultInventoryScannerTest {
         override suspend fun list(canonicalPath: String): List<RemoteEntry> = listings[canonicalPath].orEmpty()
         override suspend fun size(canonicalPath: String): Long? = sizes[canonicalPath]
         override suspend fun ensureDirectory(canonicalPath: String) = error("mutation not allowed")
+        override suspend fun delete(canonicalPath: String) = error("mutation not allowed")
         override suspend fun upload(canonicalPath: String, source: InputStream, onProgress: (Long) -> Unit) = error("mutation not allowed")
         override suspend fun download(canonicalPath: String, destination: OutputStream, onProgress: (Long) -> Unit) {
             downloadCalls += 1
