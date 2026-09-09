@@ -5,7 +5,8 @@ import java.io.EOFException
 import java.io.InputStream
 
 object StfsHeaderReader {
-    private const val HEADER_BYTES_REQUIRED = 0x368
+    const val REQUIRED_BYTES: Int = 0x368
+
     private const val CONTENT_TYPE_OFFSET = 0x344
     private const val MEDIA_ID_OFFSET = 0x354
     private const val TITLE_ID_OFFSET = 0x360
@@ -13,7 +14,7 @@ object StfsHeaderReader {
     private const val DISC_IN_SET_OFFSET = 0x367
 
     fun inspect(input: InputStream): StfsMetadata {
-        val header = ByteArray(HEADER_BYTES_REQUIRED)
+        val header = ByteArray(REQUIRED_BYTES)
         var readTotal = 0
         while (readTotal < header.size) {
             val read = input.read(header, readTotal, header.size - readTotal)
@@ -29,8 +30,8 @@ object StfsHeaderReader {
     }
 
     fun inspect(header: ByteArray): StfsMetadata {
-        require(header.size >= HEADER_BYTES_REQUIRED) {
-            "Header STFS incompleto: ${header.size} bytes; esperado pelo menos $HEADER_BYTES_REQUIRED."
+        require(header.size >= REQUIRED_BYTES) {
+            "Header STFS incompleto: ${header.size} bytes; esperado pelo menos $REQUIRED_BYTES."
         }
 
         val magic = header.copyOfRange(0, 4).toString(Charsets.US_ASCII)
