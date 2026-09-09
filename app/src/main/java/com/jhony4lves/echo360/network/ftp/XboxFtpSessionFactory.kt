@@ -12,9 +12,12 @@ data class RoutedFtpSession(
     val route: FtpRoute,
     val session: XboxFtpSession,
     val fallbackReason: String? = null,
+    val benchmark: FtpSelectionBenchmark? = null,
 )
 
-class XboxFtpSessionFactory {
+class XboxFtpSessionFactory(
+    private val autoRouter: FtpAutoRouter = FtpAutoRouter(),
+) {
     suspend fun connect(
         profile: XboxProfile,
         route: FtpRoute,
@@ -29,23 +32,14 @@ class XboxFtpSessionFactory {
             session = FtpDllActiveFtpSession.connect(profile),
         )
 
-        FtpRoute.Auto -> {
-            val fast = runCatching { AuroraPassiveFtpSession.connect(profile) }
-            fast.fold(
-                onSuccess = { session ->
-                    RoutedFtpSession(
-                        route = FtpRoute.Fast,
-                        session = session,
-                    )
-                },
-                onFailure = { fastError ->
-                    RoutedFtpSession(
-                        route = FtpRoute.Background,
-                        session = FtpDllActiveFtpSession.connect(profile),
-                        fallbackReason = fastError.message ?: "Aurora FTP indisponível.",
-                    )
-                },
-            )
-        }
+        FtpRoute.Auto -> autoRouter.connect(
+            profile = profile,
+            fastConnector = { AuroraPassiveFtpSession.connect(profile) },
+            backgroundConnector = { FtpDllActiveFtpSession.connect(profile) },
+        )
+    }
+
+    suspend fun invalidateAutoSelection() {
+        autoRouter.invalidate()
     }
 }

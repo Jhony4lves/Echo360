@@ -17,6 +17,8 @@ interface XboxFtpSession {
 
     suspend fun ensureDirectory(canonicalPath: String)
 
+    suspend fun delete(canonicalPath: String)
+
     /**
      * Consumes and closes [source]. The callback receives cumulative bytes sent.
      */

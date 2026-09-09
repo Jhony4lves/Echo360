@@ -11,6 +11,13 @@ plugins {
 val generatedLauncherIconResDir =
     layout.buildDirectory.dir("generated/echo360/launcherIcon/res").get().asFile
 
+val ciBuildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER")
+    .orNull
+    ?.toIntOrNull()
+    ?.coerceAtLeast(1)
+val echoVersionCode = ciBuildNumber ?: 1
+val echoVersionName = ciBuildNumber?.let { "0.1.0-alpha01+build.$it" } ?: "0.1.0-alpha01-local"
+
 android {
     namespace = "com.jhony4lves.echo360"
     compileSdk = 35
@@ -19,8 +26,8 @@ android {
         applicationId = "com.jhony4lves.echo360"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-alpha01"
+        versionCode = echoVersionCode
+        versionName = echoVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -5,6 +5,7 @@ import com.jhony4lves.echo360.domain.transfer.RemoteTransferFile
 import com.jhony4lves.echo360.domain.transfer.normalizeRelativePath
 import com.jhony4lves.echo360.domain.transfer.relativeKey
 import com.jhony4lves.echo360.domain.xbox.XboxPath
+import com.jhony4lves.echo360.network.ftp.FtpProtocolException
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 
 class RemoteTreeScanner {
@@ -18,7 +19,16 @@ class RemoteTreeScanner {
         val remoteFiles = mutableListOf<RemoteTransferFile>()
 
         suspend fun walk(canonicalDirectory: String, relativeDirectory: String) {
-            val entries = session.list(canonicalDirectory)
+            val entries = try {
+                session.list(canonicalDirectory)
+            } catch (error: FtpProtocolException) {
+                if (error.ftpCode == 550) {
+                    // A missing destination directory is a valid synchronization state:
+                    // every matching local file below it is simply absent remotely.
+                    return
+                }
+                throw error
+            }
 
             for (entry in entries) {
                 val relative = normalizeRelativePath(
