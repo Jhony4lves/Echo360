@@ -113,28 +113,31 @@ class FtpAutoRouter(
         route: FtpRoute,
         connector: suspend () -> XboxFtpSession,
     ): Candidate {
-        var session: XboxFtpSession? = null
-        var remotePath: String? = null
+        var sessionForCleanup: XboxFtpSession? = null
+        var pathForCleanup: String? = null
 
         return try {
-            session = connector()
+            val currentSession = connector()
+            sessionForCleanup = currentSession
+
             val suffix = token().take(16).ifBlank { "bench" }
-            remotePath = "$BENCHMARK_ROOT/${route.name.lowercase()}-$suffix.bin"
+            val remotePath = "$BENCHMARK_ROOT/${route.name.lowercase()}-$suffix.bin"
+            pathForCleanup = remotePath
             val payload = ByteArray(benchmarkBytes) { index -> ((index * 31) xor (index ushr 3)).toByte() }
 
             val started = nanoTime()
-            session.upload(remotePath, ByteArrayInputStream(payload))
+            currentSession.upload(remotePath, ByteArrayInputStream(payload))
             val elapsedNanos = (nanoTime() - started).coerceAtLeast(1L)
 
-            val remoteSize = session.size(remotePath)
+            val remoteSize = currentSession.size(remotePath)
             if (remoteSize != benchmarkBytes.toLong()) {
                 throw IOException(
                     "Benchmark ${route.name} não pôde ser verificado: esperado $benchmarkBytes, recebido ${remoteSize ?: "indisponível"}.",
                 )
             }
 
-            runCatching { session.delete(remotePath) }
-            remotePath = null
+            runCatching { currentSession.delete(remotePath) }
+            pathForCleanup = null
 
             val bytesPerSecond = ((benchmarkBytes.toDouble() * 1_000_000_000.0) / elapsedNanos.toDouble())
                 .toLong()
@@ -143,7 +146,7 @@ class FtpAutoRouter(
 
             Candidate(
                 route = route,
-                session = session,
+                session = currentSession,
                 sample = FtpBenchmarkSample(
                     route = route,
                     bytesPerSecond = bytesPerSecond,
@@ -152,12 +155,12 @@ class FtpAutoRouter(
                 ),
             )
         } catch (error: Throwable) {
-            val current = session
-            val cleanupPath = remotePath
-            if (current != null && cleanupPath != null) {
-                runCatching { current.delete(cleanupPath) }
+            val currentSession = sessionForCleanup
+            val cleanupPath = pathForCleanup
+            if (currentSession != null && cleanupPath != null) {
+                runCatching { currentSession.delete(cleanupPath) }
             }
-            current?.let { runCatching { it.close() } }
+            currentSession?.let { runCatching { it.close() } }
             Candidate(
                 route = route,
                 error = error,
