@@ -85,30 +85,35 @@ class EchoFixRepository(
                 contentUri = file.uri.toString(),
             )
 
-            val metadata = runCatching {
+            val metadataResult = runCatching {
                 appContext.contentResolver.openInputStream(file.uri)?.use(StfsHeaderReader::inspect)
                     ?: error("Android não conseguiu abrir o arquivo.")
-            }.getOrElse { error ->
+            }
+            if (metadataResult.isFailure) {
+                val error = metadataResult.exceptionOrNull()
                 issues += RepairIssue(
                     severity = RepairSeverity.Warning,
-                    message = "Ignorado: ${error.message ?: "header STFS inválido"}",
+                    message = "Ignorado: ${error?.message ?: "header STFS inválido"}",
                     sourcePath = sourcePath,
                 )
                 continue
             }
+            val metadata = metadataResult.getOrThrow()
 
-            val action = runCatching {
+            val actionResult = runCatching {
                 StockDlcInstallerRule.plan(source, metadata)
-            }.getOrElse { error ->
+            }
+            if (actionResult.isFailure) {
+                val error = actionResult.exceptionOrNull()
                 issues += RepairIssue(
                     severity = RepairSeverity.Warning,
-                    message = error.message ?: "Pacote não é compatível com esta regra.",
+                    message = error?.message ?: "Pacote não é compatível com esta regra.",
                     sourcePath = sourcePath,
                 )
                 continue
             }
 
-            actions += action
+            actions += actionResult.getOrThrow()
         }
 
         if (actions.isEmpty() && issues.none { it.severity == RepairSeverity.Error }) {
