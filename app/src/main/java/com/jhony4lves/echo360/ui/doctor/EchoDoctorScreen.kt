@@ -44,7 +44,7 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
                             fontWeight = FontWeight.Black,
                         )
                     }
-                    EchoStatusPill(text = "READ ONLY", active = true)
+                    EchoStatusPill(text = "EVIDENCE FIRST", active = true)
                 }
                 Spacer(Modifier.height(7.dp))
                 Text(
@@ -56,13 +56,14 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
         }
 
         item { DoctorFullScanSection() }
+        item { EchoFixSection() }
         item { DashLaunchDoctorSection() }
         item { DoctorTelemetrySection() }
         item { DoctorStorageSection() }
 
         item {
             Text(
-                "Phase atual: diagnóstico read-only. Alterações de plugin/configuração só serão adicionadas com backup e rollback explícitos.",
+                "EchoFix começa em dry-run: identifica a causa, lê metadados e mostra o destino antes de entregar qualquer escrita ao EchoTransfer.",
                 style = MaterialTheme.typography.labelMedium,
                 color = EchoColors.TextMuted,
             )
