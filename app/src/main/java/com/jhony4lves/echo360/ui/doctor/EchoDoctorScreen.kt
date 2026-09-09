@@ -56,14 +56,25 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
         }
 
         item { DoctorFullScanSection() }
+        item { XboxEchoFixSection() }
+
+        item {
+            Text(
+                "ORIGEM ALTERNATIVA // ANDROID",
+                style = MaterialTheme.typography.labelMedium,
+                color = EchoColors.TextMuted,
+                fontWeight = FontWeight.Bold,
+            )
+        }
         item { EchoFixSection() }
+
         item { DashLaunchDoctorSection() }
         item { DoctorTelemetrySection() }
         item { DoctorStorageSection() }
 
         item {
             Text(
-                "EchoFix começa em dry-run: identifica a causa, lê metadados e mostra o destino antes de entregar qualquer escrita ao EchoTransfer.",
+                "EchoFix prioriza arquivos que já estão no Xbox: escaneia, lê somente o header STFS, valida origem/destino e tenta move server-side. A origem Android permanece apenas como alternativa.",
                 style = MaterialTheme.typography.labelMedium,
                 color = EchoColors.TextMuted,
             )
