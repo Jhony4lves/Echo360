@@ -45,12 +45,26 @@ class EchoTransferRepository(
         val localTree = localScanner.scan(localTreeUri)
         val canonicalRoot = XboxPath.canonical(remoteRoot)
 
-        val remoteResult = scanRemote(
-            profile = profile,
-            localTree = localTree,
-            canonicalRoot = canonicalRoot,
-            route = requestedRoute,
-        )
+        // Analysis and browsing remain read-only. Auto throughput benchmarking is
+        // deferred until execute(), where a transfer is actually about to mutate
+        // the remote filesystem.
+        val remoteResult = when (requestedRoute) {
+            FtpRoute.Fast -> scanRemote(profile, localTree, canonicalRoot, FtpRoute.Fast)
+            FtpRoute.Background -> scanRemote(profile, localTree, canonicalRoot, FtpRoute.Background)
+            FtpRoute.Auto -> runCatching {
+                scanRemote(profile, localTree, canonicalRoot, FtpRoute.Fast)
+            }.getOrElse { fastError ->
+                scanRemote(
+                    profile = profile,
+                    localTree = localTree,
+                    canonicalRoot = canonicalRoot,
+                    route = FtpRoute.Background,
+                ).copy(
+                    fallbackReason = fastError.message
+                        ?: "Aurora FTP indisponível durante a análise.",
+                )
+            }
+        }
 
         return TransferCompareEngine.compare(
             local = localTree,
@@ -68,9 +82,9 @@ class EchoTransferRepository(
      * The same FTP session is reused while healthy. Transient transport failures
      * are retried on the same route with bounded backoff, restarting the current
      * file from byte zero. In Auto mode, the fastest healthy provider is selected
-     * and exhausted retries fall back once to the other FTP provider. Every
-     * successful STOR is verified with a remote SIZE. Every terminal run is
-     * persisted in the local transfer history.
+     * immediately before the first upload and exhausted retries fall back once to
+     * the other FTP provider. Every successful STOR is verified with a remote SIZE.
+     * Every terminal run is persisted in the local transfer history.
      */
     suspend fun execute(
         analysis: TransferAnalysis,
@@ -310,26 +324,27 @@ class EchoTransferRepository(
                             continue
                         }
 
-                        val alternateRoute = alternateRoute(failureRoute)
+                        val fallbackRoute = otherFtpRoute(failureRoute)
                         val canFallback = transient &&
                             analysis.requestedRoute == FtpRoute.Auto &&
-                            alternateRoute != null &&
+                            fallbackRoute != null &&
                             !fallbackAttempted
 
                         if (canFallback) {
+                            val resolvedFallbackRoute = checkNotNull(fallbackRoute)
                             fallbackAttempted = true
                             sameRouteRetries = 0
                             totalRetryCount += 1
                             val reason = error.message ?: "${providerLabel(failureRoute)} falhou durante o envio."
-                            fallbackReason = "${providerLabel(failureRoute)} → ${providerLabel(checkNotNull(alternateRoute))} após retries: $reason"
-                            desiredRoute = alternateRoute
+                            fallbackReason = "${providerLabel(failureRoute)} → ${providerLabel(resolvedFallbackRoute)} após retries: $reason"
+                            desiredRoute = resolvedFallbackRoute
                             sessionFactory.invalidateAutoSelection()
                             emit(
                                 status = TransferExecutionStatus.Preparing,
                                 item = item,
                                 fileIndex = index + 1,
                                 currentBytes = 0L,
-                                message = "${providerLabel(failureRoute)} continuou instável. Mudando para ${providerLabel(alternateRoute)} e reiniciando o arquivo.",
+                                message = "${providerLabel(failureRoute)} continuou instável. Mudando para ${providerLabel(resolvedFallbackRoute)} e reiniciando o arquivo.",
                                 force = true,
                             )
                             closeCurrentSession()
@@ -525,7 +540,7 @@ private fun remoteTarget(remoteRoot: String, relativePath: String): String =
         XboxPath.canonical(remoteRoot).trimEnd('/') + "/" + relativePath.replace('\\', '/').trim('/'),
     )
 
-private fun alternateRoute(route: FtpRoute): FtpRoute? = when (route) {
+private fun otherFtpRoute(route: FtpRoute): FtpRoute? = when (route) {
     FtpRoute.Fast -> FtpRoute.Background
     FtpRoute.Background -> FtpRoute.Fast
     FtpRoute.Auto -> null
