@@ -76,9 +76,6 @@ internal class FtpCommandChannel(
         require(username.isNotBlank()) { "Usuário FTP não configurado." }
         require(password.isNotBlank()) { "Senha FTP não configurada." }
 
-        // Resolve the configured endpoint before entering Socket.apply. Inside
-        // apply, an unqualified `port` resolves to Socket.port (0 before the
-        // connection), not FtpCommandChannel.port.
         val controlEndpoint = InetSocketAddress(host, port)
         val connected = Socket().apply {
             soTimeout = timeoutMs
@@ -164,18 +161,29 @@ internal class FtpCommandChannel(
         }
     }
 
-    override fun close() {
-        if (socket == null) return
-        runCatching {
-            send("QUIT", "resposta QUIT")
-            read()
-        }
+    /**
+     * Tears the control socket down without sending QUIT. This is intentional
+     * for short prefix RETR sessions: after the client closes the data socket
+     * before EOF, different FTP servers emit different 426/226/ABOR sequences.
+     * Closing the dedicated control connection prevents a stale completion
+     * reply from contaminating a later command.
+     */
+    fun closeImmediately() {
         runCatching { reader?.close() }
         runCatching { writer?.close() }
         runCatching { socket?.close() }
         reader = null
         writer = null
         socket = null
+    }
+
+    override fun close() {
+        if (socket == null) return
+        runCatching {
+            send("QUIT", "resposta QUIT")
+            read()
+        }
+        closeImmediately()
     }
 
     private fun requireSocket(): Socket = socket ?: throw IOException("Canal FTP não conectado.")
