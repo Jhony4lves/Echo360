@@ -66,14 +66,17 @@ class GodInstallerRepository(
             val godDirectories = discoverGodDirectories(routed.session, root)
             var processed = 0L
             for (godDirectory in godDirectories) {
-                val listing = runCatching { routed.session.list(godDirectory) }.getOrElse { error ->
+                val listingAttempt = runCatching { routed.session.list(godDirectory) }
+                if (listingAttempt.isFailure) {
+                    val error = listingAttempt.exceptionOrNull()
                     issues += RepairIssue(
                         severity = RepairSeverity.Warning,
-                        message = "Não foi possível listar $godDirectory: ${error.message ?: "erro FTP"}",
+                        message = "Não foi possível listar $godDirectory: ${error?.message ?: "erro FTP"}",
                         sourcePath = godDirectory,
                     )
                     continue
                 }
+                val listing = listingAttempt.getOrThrow()
 
                 val dataDirectories = listing
                     .filter(RemoteEntry::isDirectory)
@@ -85,16 +88,20 @@ class GodInstallerRepository(
 
                 for (packageFile in packageFiles) {
                     val dataDirectory = dataDirectories["${packageFile.name}.data".lowercase()] ?: continue
-                    val partListing = runCatching { routed.session.list(dataDirectory.canonicalPath) }
-                        .getOrElse { error ->
-                            issues += RepairIssue(
-                                severity = RepairSeverity.Warning,
-                                message = "GOD encontrado, mas não consegui listar ${dataDirectory.canonicalPath}: ${error.message ?: "erro FTP"}",
-                                sourcePath = packageFile.canonicalPath,
-                            )
-                            continue
-                        }
-                    val parts = toGodParts(partListing)
+
+                    val partListingAttempt = runCatching {
+                        routed.session.list(dataDirectory.canonicalPath)
+                    }
+                    if (partListingAttempt.isFailure) {
+                        val error = partListingAttempt.exceptionOrNull()
+                        issues += RepairIssue(
+                            severity = RepairSeverity.Warning,
+                            message = "GOD encontrado, mas não consegui listar ${dataDirectory.canonicalPath}: ${error?.message ?: "erro FTP"}",
+                            sourcePath = packageFile.canonicalPath,
+                        )
+                        continue
+                    }
+                    val parts = toGodParts(partListingAttempt.getOrThrow())
                     if (parts.isEmpty()) {
                         issues += RepairIssue(
                             severity = RepairSeverity.Warning,
@@ -104,7 +111,7 @@ class GodInstallerRepository(
                         continue
                     }
 
-                    val prefix = runCatching {
+                    val prefixAttempt = runCatching {
                         readPrefixWithFallback(
                             profile = profile,
                             canonicalPath = packageFile.canonicalPath,
@@ -112,23 +119,30 @@ class GodInstallerRepository(
                             requestedRoute = requestedRoute,
                             preferredRoute = preferredRoute,
                         ).first
-                    }.getOrElse { error ->
+                    }
+                    if (prefixAttempt.isFailure) {
+                        val error = prefixAttempt.exceptionOrNull()
                         issues += RepairIssue(
                             severity = RepairSeverity.Warning,
-                            message = "Não consegui ler o header GOD ${packageFile.name}: ${error.message ?: "erro FTP"}",
+                            message = "Não consegui ler o header GOD ${packageFile.name}: ${error?.message ?: "erro FTP"}",
                             sourcePath = packageFile.canonicalPath,
                         )
                         continue
                     }
 
-                    val metadata = runCatching { StfsHeaderReader.inspect(prefix) }.getOrElse { error ->
+                    val metadataAttempt = runCatching {
+                        StfsHeaderReader.inspect(prefixAttempt.getOrThrow())
+                    }
+                    if (metadataAttempt.isFailure) {
+                        val error = metadataAttempt.exceptionOrNull()
                         issues += RepairIssue(
                             severity = RepairSeverity.Warning,
-                            message = "Container ignorado: ${error.message ?: "STFS inválido"}",
+                            message = "Container ignorado: ${error?.message ?: "STFS inválido"}",
                             sourcePath = packageFile.canonicalPath,
                         )
                         continue
                     }
+                    val metadata = metadataAttempt.getOrThrow()
                     if (metadata.contentType != CONTENT_TYPE_GOD) continue
 
                     val titleDirectory = godDirectory
@@ -152,8 +166,6 @@ class GodInstallerRepository(
                         headerSize = packageFile.size.coerceAtLeast(0L),
                         metadata = metadata,
                         dataParts = parts,
-                        // Worst-case estimate before the XSF probe. Deep analysis
-                        // replaces this with the exact value.
                         estimatedIsoBytes = parts.sumOf(GodDataPart::payloadSize) +
                             GodContainerFormat.SYNTHETIC_XSF_HEADER_BYTES,
                     )
