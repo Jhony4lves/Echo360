@@ -11,8 +11,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.BuildCircle
+import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WarningAmber
@@ -21,6 +25,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -37,8 +42,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.data.fix.EchoFixRepository
+import com.jhony4lves.echo360.data.transfer.EchoTransferRepository
 import com.jhony4lves.echo360.domain.fix.RepairPlan
 import com.jhony4lves.echo360.domain.fix.RepairSeverity
+import com.jhony4lves.echo360.domain.transfer.TransferAnalysis
+import com.jhony4lves.echo360.domain.transfer.TransferCancellationToken
+import com.jhony4lves.echo360.domain.transfer.TransferExecutionProgress
+import com.jhony4lves.echo360.domain.transfer.TransferExecutionStatus
+import com.jhony4lves.echo360.network.ftp.FtpRoute
 import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.components.EchoPanel
 import com.jhony4lves.echo360.ui.components.EchoStatusPill
@@ -50,6 +61,7 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val appContext = context.applicationContext
     val repository = remember(appContext) { EchoFixRepository(appContext) }
+    val transferRepository = remember(appContext) { EchoTransferRepository(appContext) }
     val prefs = remember(appContext) {
         appContext.getSharedPreferences("echo_fix", android.content.Context.MODE_PRIVATE)
     }
@@ -59,8 +71,21 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
         mutableStateOf(prefs.getString("installer_tree", null)?.let(Uri::parse))
     }
     var plan by remember { mutableStateOf<RepairPlan?>(null) }
+    var analyses by remember { mutableStateOf<List<TransferAnalysis>?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var resultMessage by remember { mutableStateOf<String?>(null) }
     var scanning by remember { mutableStateOf(false) }
+    var validating by remember { mutableStateOf(false) }
+    var repairing by remember { mutableStateOf(false) }
+    var executionProgress by remember { mutableStateOf<TransferExecutionProgress?>(null) }
+    var cancellationToken by remember { mutableStateOf<TransferCancellationToken?>(null) }
+
+    fun invalidatePreparedState() {
+        analyses = null
+        executionProgress = null
+        resultMessage = null
+        cancellationToken = null
+    }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -76,6 +101,7 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
             prefs.edit().putString("installer_tree", uri.toString()).apply()
             plan = null
             errorMessage = null
+            invalidatePreparedState()
         }
     }
 
@@ -84,6 +110,7 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
         scanning = true
         plan = null
         errorMessage = null
+        invalidatePreparedState()
         scope.launch {
             runCatching { repository.scanStockDlcInstaller(uri) }
                 .onSuccess { plan = it }
@@ -91,6 +118,89 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
             scanning = false
         }
     }
+
+    fun validateOnXbox(currentPlan: RepairPlan) {
+        validating = true
+        errorMessage = null
+        resultMessage = null
+        analyses = null
+        scope.launch {
+            runCatching {
+                repository.prepareTransferAnalyses(currentPlan, FtpRoute.Auto)
+            }.onSuccess { prepared ->
+                analyses = prepared
+            }.onFailure { error ->
+                errorMessage = error.message ?: "Não foi possível validar os destinos no Xbox."
+            }
+            validating = false
+        }
+    }
+
+    fun executeRepair(currentPlan: RepairPlan, prepared: List<TransferAnalysis>) {
+        if (prepared.any { it.differentCount > 0 }) {
+            errorMessage = "Reparo bloqueado: existe arquivo no destino com tamanho diferente. O EchoFix não sobrescreve conflitos automaticamente."
+            return
+        }
+
+        val token = TransferCancellationToken()
+        cancellationToken = token
+        repairing = true
+        errorMessage = null
+        resultMessage = null
+        executionProgress = null
+
+        scope.launch {
+            var failed = false
+            var uploadedFiles = 0
+
+            for (analysis in prepared) {
+                if (token.isCancelled()) break
+                if (analysis.uploadCount == 0) continue
+
+                val result = transferRepository.execute(
+                    analysis = analysis,
+                    cancellationToken = token,
+                    onProgress = { executionProgress = it },
+                )
+
+                uploadedFiles += result.verifiedFiles
+                when (result.status) {
+                    TransferExecutionStatus.Completed -> Unit
+                    TransferExecutionStatus.Cancelled -> {
+                        resultMessage = "Reparo cancelado com segurança. Arquivos já verificados foram mantidos."
+                        failed = true
+                        break
+                    }
+                    TransferExecutionStatus.Failed -> {
+                        errorMessage = result.message ?: "EchoTransfer falhou durante o reparo."
+                        failed = true
+                        break
+                    }
+                    else -> Unit
+                }
+            }
+
+            if (!failed && !token.isCancelled()) {
+                resultMessage = "$uploadedFiles pacote(s) enviados e verificados por SIZE."
+                runCatching {
+                    repository.prepareTransferAnalyses(currentPlan, FtpRoute.Auto)
+                }.onSuccess { verified ->
+                    analyses = verified
+                    if (verified.sumOf { it.sameCount } == currentPlan.actions.size) {
+                        resultMessage = "Reparo concluído: ${currentPlan.actions.size} pacote(s) estão no destino correto e foram verificados por SIZE."
+                    }
+                }
+            }
+
+            repairing = false
+            cancellationToken = null
+        }
+    }
+
+    val currentAnalyses = analyses
+    val sameCount = currentAnalyses?.sumOf(TransferAnalysis::sameCount) ?: 0
+    val missingCount = currentAnalyses?.sumOf(TransferAnalysis::missingCount) ?: 0
+    val differentCount = currentAnalyses?.sumOf(TransferAnalysis::differentCount) ?: 0
 
     EchoPanel(modifier = modifier.fillMaxWidth(), highlighted = plan?.canExecute == true) {
         Column(
@@ -112,17 +222,26 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
                         fontWeight = FontWeight.Black,
                     )
                 }
-                EchoStatusPill(text = "DRY RUN", active = true)
+                EchoStatusPill(
+                    text = when {
+                        repairing -> "REPAIRING"
+                        currentAnalyses != null && differentCount == 0 -> "READY"
+                        plan?.canExecute == true -> "PLAN OK"
+                        else -> "DRY RUN"
+                    },
+                    active = plan?.canExecute == true,
+                )
             }
 
             Text(
-                "Detecta o padrão FFED2000/FFFFFFFF, lê o header STFS e calcula o destino correto sem mover ou apagar nada.",
+                "Detecta FFED2000/FFFFFFFF, lê STFS, calcula o destino e só entrega a escrita ao EchoTransfer depois da validação.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
 
             OutlinedButton(
                 onClick = { picker.launch(null) },
+                enabled = !repairing,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Outlined.FolderOpen, contentDescription = null)
@@ -140,7 +259,7 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
 
                 Button(
                     onClick = ::scan,
-                    enabled = !scanning,
+                    enabled = !scanning && !repairing && !validating,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = EchoColors.NeonGreen,
@@ -149,11 +268,11 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
                 ) {
                     if (scanning) {
                         CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 9.dp),
+                            modifier = Modifier.size(18.dp),
                             color = EchoColors.Void,
                             strokeWidth = 2.dp,
                         )
-                        Text("ANALISANDO...")
+                        Text("  ANALISANDO...")
                     } else {
                         Icon(Icons.Outlined.Search, contentDescription = null)
                         Text(" ANALISAR E MONTAR PLANO")
@@ -162,21 +281,19 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
             }
 
             errorMessage?.let { message ->
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Outlined.WarningAmber,
-                        contentDescription = null,
-                        tint = EchoColors.Warning,
-                    )
-                    Text(
-                        message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = EchoColors.Warning,
-                    )
-                }
+                FixMessage(
+                    icon = Icons.Outlined.WarningAmber,
+                    message = message,
+                    color = EchoColors.Warning,
+                )
+            }
+
+            resultMessage?.let { message ->
+                FixMessage(
+                    icon = Icons.Outlined.CheckCircle,
+                    message = message,
+                    color = EchoColors.SignalGreen,
+                )
             }
 
             plan?.let { current ->
@@ -264,12 +381,114 @@ fun EchoFixSection(modifier: Modifier = Modifier) {
                     )
                 }
 
-                if (current.canExecute) {
+                if (current.canExecute && currentAnalyses == null) {
+                    OutlinedButton(
+                        onClick = { validateOnXbox(current) },
+                        enabled = !validating && !repairing,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (validating) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = EchoColors.NeonGreen,
+                                strokeWidth = 2.dp,
+                            )
+                            Text("  VALIDANDO...")
+                        } else {
+                            Icon(Icons.Outlined.Search, contentDescription = null)
+                            Text(" VALIDAR DESTINOS NO XBOX")
+                        }
+                    }
                     Text(
-                        "Plano pronto. Esta fase ainda é somente leitura; a execução será entregue ao EchoTransfer na próxima etapa.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = EchoColors.NeonGreen,
+                        "A validação usa SIZE e o roteador AUTO. Nenhum arquivo de jogo é alterado nessa etapa.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = EchoColors.TextMuted,
                     )
+                }
+
+                currentAnalyses?.let { prepared ->
+                    HorizontalDivider(color = EchoColors.Border)
+                    EchoEyebrow("DESTINO // XBOX")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        FixMetric("IGUAIS", sameCount.toString(), Modifier.weight(1f))
+                        FixMetric("AUSENTES", missingCount.toString(), Modifier.weight(1f))
+                        FixMetric("CONFLITOS", differentCount.toString(), Modifier.weight(1f))
+                    }
+
+                    when {
+                        differentCount > 0 -> {
+                            FixMessage(
+                                icon = Icons.Outlined.WarningAmber,
+                                message = "$differentCount arquivo(s) existem com tamanho diferente. O reparo automático está bloqueado para evitar sobrescrita destrutiva.",
+                                color = EchoColors.Warning,
+                            )
+                        }
+
+                        missingCount == 0 -> {
+                            FixMessage(
+                                icon = Icons.Outlined.CheckCircle,
+                                message = "Nada para corrigir: todos os pacotes já estão no destino e têm o tamanho esperado.",
+                                color = EchoColors.SignalGreen,
+                            )
+                        }
+
+                        else -> {
+                            Button(
+                                onClick = { executeRepair(current, prepared) },
+                                enabled = !repairing && !validating,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = EchoColors.NeonGreen,
+                                    contentColor = EchoColors.Void,
+                                ),
+                            ) {
+                                Icon(Icons.Outlined.CloudUpload, contentDescription = null)
+                                Text(" CORRIGIR $missingCount PACOTE(S) VIA AUTO")
+                            }
+                        }
+                    }
+                }
+
+                executionProgress?.let { progress ->
+                    HorizontalDivider(color = EchoColors.Border)
+                    EchoEyebrow("ECHOFIX // TRANSFER")
+                    progress.currentFile?.let { file ->
+                        Text(
+                            file,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = EchoColors.Text,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { progress.overallFraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp),
+                        color = EchoColors.NeonGreen,
+                        trackColor = EchoColors.SurfaceBright,
+                    )
+                    Text(
+                        "${(progress.overallFraction * 100).toInt()}% • ${formatFixBytes(progress.logicalBytesTransferred)} / ${formatFixBytes(progress.totalBytes)}" +
+                            if (progress.bytesPerSecond > 0L) " • ${formatFixBytes(progress.bytesPerSecond)}/s" else "",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = EchoColors.TextSecondary,
+                    )
+                }
+
+                if (repairing) {
+                    OutlinedButton(
+                        onClick = { cancellationToken?.cancel() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = EchoColors.Error),
+                    ) {
+                        Icon(Icons.Outlined.Cancel, contentDescription = null)
+                        Text(" CANCELAR COM SEGURANÇA")
+                    }
                 }
             }
         }
@@ -289,6 +508,43 @@ private fun FixField(label: String, value: String) {
             value,
             style = MaterialTheme.typography.bodySmall,
             color = EchoColors.TextSecondary,
+        )
+    }
+}
+
+@Composable
+private fun FixMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            color = EchoColors.Text,
+            fontWeight = FontWeight.Black,
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = EchoColors.TextMuted,
+        )
+    }
+}
+
+@Composable
+private fun FixMessage(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    message: String,
+    color: androidx.compose.ui.graphics.Color,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = color)
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = color,
+            modifier = Modifier.weight(1f),
         )
     }
 }
