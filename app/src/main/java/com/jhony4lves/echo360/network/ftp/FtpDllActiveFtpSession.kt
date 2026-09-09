@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -77,6 +78,72 @@ class FtpDllActiveFtpSession private constructor(
         withContext(Dispatchers.IO) {
             val remote = XboxPath.toFtpDllPath(XboxPath.canonical(canonicalPath))
             requirePositive(channel.command("DELE $remote"), "FTPdll recusou DELE.")
+        }
+    }
+
+    override suspend fun readPrefixAndClose(
+        canonicalPath: String,
+        byteCount: Int,
+    ): ByteArray = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            require(byteCount > 0) { "byteCount deve ser maior que zero." }
+            val remote = XboxPath.toFtpDllPath(XboxPath.canonical(canonicalPath))
+            val output = ByteArrayOutputStream(byteCount.coerceAtMost(64 * 1024))
+
+            try {
+                prepareActiveListener().use { listener ->
+                    channel.send("RETR $remote")
+                    requirePreliminary(channel.read(), "FTPdll não iniciou RETR parcial.")
+
+                    val dataSocket = try {
+                        listener.accept()
+                    } catch (error: SocketTimeoutException) {
+                        throw FtpStageTimeoutException("aguardando conexão ativa do Xbox para RETR parcial", error)
+                    }
+
+                    dataSocket.use { socket ->
+                        socket.soTimeout = timeoutMs
+                        val input = socket.getInputStream()
+                        val buffer = ByteArray(minOf(32 * 1024, byteCount))
+                        var remaining = byteCount
+                        while (remaining > 0) {
+                            val read = input.read(buffer, 0, minOf(buffer.size, remaining))
+                            if (read < 0) break
+                            if (read == 0) continue
+                            output.write(buffer, 0, read)
+                            remaining -= read
+                        }
+                    }
+                }
+                output.toByteArray()
+            } finally {
+                channel.closeImmediately()
+            }
+        }
+    }
+
+    override suspend fun rename(
+        fromCanonicalPath: String,
+        toCanonicalPath: String,
+    ) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val fromCanonical = XboxPath.canonical(fromCanonicalPath)
+            val toCanonical = XboxPath.canonical(toCanonicalPath)
+            require(fromCanonical != toCanonical) { "Origem e destino do rename são iguais." }
+
+            val parent = toCanonical.substringBeforeLast('/', "/").ifBlank { "/" }
+            ensureDirectoryLocked(parent)
+
+            val fromRemote = XboxPath.toFtpDllPath(fromCanonical)
+            val toRemote = XboxPath.toFtpDllPath(toCanonical)
+            val rnfr = channel.command("RNFR $fromRemote")
+            if (rnfr.code != 350) {
+                throw FtpProtocolException(
+                    rnfr.code,
+                    ftpReplyMessage("FTPdll recusou RNFR.", rnfr),
+                )
+            }
+            requirePositive(channel.command("RNTO $toRemote"), "FTPdll recusou RNTO.")
         }
     }
 
