@@ -1,44 +1,60 @@
 package com.jhony4lves.echo360.domain.xbox
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class XboxProfileTest {
     @Test
-    fun `EchoLink defaults to published port 36000`() {
-        assertEquals(36_000, XboxEndpoint().echoLinkPort)
+    fun `active endpoint defaults match Aurora and FTPdll ports`() {
+        val endpoint = XboxEndpoint()
+        assertEquals(9999, endpoint.novaPort)
+        assertEquals(21, endpoint.auroraFtpPort)
+        assertEquals(7564, endpoint.ftpDllPort)
     }
 
     @Test
-    fun `endpoint validation rejects invalid EchoLink port`() {
+    fun `endpoint validation rejects invalid active port`() {
         assertThrows(IllegalArgumentException::class.java) {
-            XboxEndpoint(host = "192.168.1.18", echoLinkPort = 0).validated()
+            XboxEndpoint(host = "192.168.1.18", ftpDllPort = 0).validated()
         }
     }
 
     @Test
-    fun `console is reachable when only EchoCore completes protocol health`() {
-        val connectedEchoCore = TransportHealth(
-            transport = XboxTransport.EchoCore,
-            status = TransportStatus.Connected,
-            detail = "PONG v1",
-            latencyMs = 5L,
-        )
-        val unavailableNova = health(XboxTransport.Nova)
-        val unavailableAurora = health(XboxTransport.AuroraFtp)
-        val unavailableFtpDll = health(XboxTransport.FtpDll)
-
+    fun `console is reachable when any active provider is connected`() {
         val snapshot = XboxConnectionSnapshot(
-            echoCore = connectedEchoCore,
-            nova = unavailableNova,
-            auroraFtp = unavailableAurora,
-            ftpDll = unavailableFtpDll,
+            nova = health(XboxTransport.Nova),
+            auroraFtp = TransportHealth(
+                transport = XboxTransport.AuroraFtp,
+                status = TransportStatus.Connected,
+                detail = "LIST ok",
+                latencyMs = 5L,
+            ),
+            ftpDll = health(XboxTransport.FtpDll),
             checkedAtEpochMs = 1L,
         )
 
         assertTrue(snapshot.consoleReachable)
+        assertTrue(snapshot.fileTransportReachable)
+    }
+
+    @Test
+    fun `NOVA alone marks console reachable but not file transport`() {
+        val snapshot = XboxConnectionSnapshot(
+            nova = TransportHealth(
+                transport = XboxTransport.Nova,
+                status = TransportStatus.Connected,
+                detail = "NOVA ok",
+            ),
+            auroraFtp = health(XboxTransport.AuroraFtp),
+            ftpDll = health(XboxTransport.FtpDll),
+            checkedAtEpochMs = 1L,
+        )
+
+        assertTrue(snapshot.consoleReachable)
+        assertFalse(snapshot.fileTransportReachable)
     }
 
     private fun health(transport: XboxTransport) = TransportHealth(
