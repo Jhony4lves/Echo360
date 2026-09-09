@@ -5,7 +5,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayInputStream
 import java.io.IOException
-import java.util.UUID
 
 /**
  * Selects the fastest healthy FTP provider for Auto mode using a small real
@@ -17,7 +16,6 @@ class FtpAutoRouter(
     private val cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val nanoTime: () -> Long = { System.nanoTime() },
-    private val token: () -> String = { UUID.randomUUID().toString().replace("-", "") },
 ) {
     private val mutex = Mutex()
     private var cached: CachedSelection? = null
@@ -120,8 +118,9 @@ class FtpAutoRouter(
             val currentSession = connector()
             sessionForCleanup = currentSession
 
-            val suffix = token().take(16).ifBlank { "bench" }
-            val remotePath = "$BENCHMARK_ROOT/${route.name.lowercase()}-$suffix.bin"
+            // Fixed names intentionally bound worst-case leftovers to two small files
+            // even if a particular FTP server does not implement DELE reliably.
+            val remotePath = "$BENCHMARK_ROOT/${probeFilename(route)}"
             pathForCleanup = remotePath
             val payload = ByteArray(benchmarkBytes) { index -> ((index * 31) xor (index ushr 3)).toByte() }
 
@@ -171,6 +170,12 @@ class FtpAutoRouter(
     private fun cacheKey(profile: XboxProfile): String {
         val endpoint = profile.endpoint.validated()
         return "${endpoint.host}:${endpoint.auroraFtpPort}:${endpoint.ftpDllPort}"
+    }
+
+    private fun probeFilename(route: FtpRoute): String = when (route) {
+        FtpRoute.Fast -> "aurora.probe"
+        FtpRoute.Background -> "ftpdll.probe"
+        FtpRoute.Auto -> error("Auto não é um provedor físico de FTP.")
     }
 
     private data class Candidate(
