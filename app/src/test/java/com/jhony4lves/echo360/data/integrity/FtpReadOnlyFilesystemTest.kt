@@ -62,6 +62,8 @@ class FtpReadOnlyFilesystemTest {
 
         override suspend fun ensureDirectory(canonicalPath: String) = error("read-only test")
 
+        override suspend fun delete(canonicalPath: String) = error("read-only test")
+
         override suspend fun upload(
             canonicalPath: String,
             source: InputStream,
