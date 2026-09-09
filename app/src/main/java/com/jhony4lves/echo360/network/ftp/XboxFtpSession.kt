@@ -41,7 +41,7 @@ interface XboxFtpSession {
     suspend fun rename(
         fromCanonicalPath: String,
         toCanonicalPath: String,
-    ) = throw UnsupportedOperationException("Rename server-side não suportado por esta sessão FTP.")
+    ): Unit = throw UnsupportedOperationException("Rename server-side não suportado por esta sessão FTP.")
 
     /**
      * Consumes and closes [source]. The callback receives cumulative bytes sent.
