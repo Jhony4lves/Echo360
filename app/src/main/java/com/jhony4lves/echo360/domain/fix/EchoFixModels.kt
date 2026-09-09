@@ -29,6 +29,7 @@ data class StfsMetadata(
 enum class RepairSourceKind {
     Android,
     Xbox,
+    GodEmbedded,
 }
 
 data class RepairSource(
