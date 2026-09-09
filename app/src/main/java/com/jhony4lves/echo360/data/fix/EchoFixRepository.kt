@@ -3,19 +3,30 @@ package com.jhony4lves.echo360.data.fix
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
+import com.jhony4lves.echo360.domain.fix.RepairAction
 import com.jhony4lves.echo360.domain.fix.RepairIssue
 import com.jhony4lves.echo360.domain.fix.RepairPlan
 import com.jhony4lves.echo360.domain.fix.RepairSeverity
 import com.jhony4lves.echo360.domain.fix.RepairSource
 import com.jhony4lves.echo360.domain.fix.StockDlcInstallerRule
+import com.jhony4lves.echo360.domain.transfer.LocalTransferFile
+import com.jhony4lves.echo360.domain.transfer.LocalTransferTree
+import com.jhony4lves.echo360.domain.transfer.RemoteTransferFile
+import com.jhony4lves.echo360.domain.transfer.TransferAnalysis
+import com.jhony4lves.echo360.domain.transfer.TransferCompareEngine
+import com.jhony4lves.echo360.network.ftp.FtpRoute
+import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.ArrayDeque
 
 class EchoFixRepository(
     context: Context,
+    private val sessionFactory: XboxFtpSessionFactory = XboxFtpSessionFactory(),
 ) {
     private val appContext = context.applicationContext
+    private val configStore = SecureXboxConfigStore(appContext)
 
     suspend fun scanStockDlcInstaller(treeUri: Uri): RepairPlan = withContext(Dispatchers.IO) {
         val root = DocumentFile.fromTreeUri(appContext, treeUri)
@@ -25,7 +36,7 @@ class EchoFixRepository(
         }
 
         val issues = mutableListOf<RepairIssue>()
-        val actions = mutableListOf<com.jhony4lves.echo360.domain.fix.RepairAction>()
+        val actions = mutableListOf<RepairAction>()
         val payload = findStockInstallerPayload(root)
 
         if (payload == null) {
@@ -116,6 +127,67 @@ class EchoFixRepository(
             issues = issues,
         )
     }
+
+    /**
+     * Checks the exact EchoFix destinations on the Xbox and converts each
+     * destination group into the normal EchoTransfer analysis model. No game
+     * file is written here; Auto may only create its bounded benchmark probe.
+     */
+    suspend fun prepareTransferAnalyses(
+        plan: RepairPlan,
+        requestedRoute: FtpRoute = FtpRoute.Auto,
+    ): List<TransferAnalysis> = withContext(Dispatchers.IO) {
+        require(plan.canExecute) { "O plano EchoFix possui erros e não pode ser preparado para envio." }
+        val profile = configStore.load()
+            ?: error("Configure o Xbox na aba Xbox antes de executar o EchoFix.")
+
+        val routed = sessionFactory.connect(profile, requestedRoute)
+        try {
+            plan.actions
+                .groupBy(RepairAction::destinationRoot)
+                .toSortedMap()
+                .map { (destinationRoot, actions) ->
+                    val localFiles = actions.map { action ->
+                        LocalTransferFile(
+                            relativePath = destinationFileName(action),
+                            size = action.source.size,
+                            contentUri = action.source.contentUri,
+                        )
+                    }
+                    require(localFiles.map { it.relativePath.lowercase() }.toSet().size == localFiles.size) {
+                        "O plano gera dois pacotes com o mesmo destino em $destinationRoot."
+                    }
+
+                    val remoteFiles = actions.mapNotNull { action ->
+                        val remoteSize = routed.session.size(action.destinationPath) ?: return@mapNotNull null
+                        RemoteTransferFile(
+                            relativePath = destinationFileName(action),
+                            size = remoteSize,
+                            canonicalPath = action.destinationPath,
+                        )
+                    }
+
+                    TransferCompareEngine.compare(
+                        local = LocalTransferTree(
+                            rootUri = plan.selectedRootUri,
+                            rootName = "EchoFix",
+                            files = localFiles,
+                            directories = setOf(""),
+                        ),
+                        remoteRoot = destinationRoot,
+                        requestedRoute = requestedRoute,
+                        usedRoute = routed.route,
+                        fallbackReason = routed.fallbackReason,
+                        remoteFiles = remoteFiles,
+                    )
+                }
+        } finally {
+            runCatching { routed.session.close() }
+        }
+    }
+
+    private fun destinationFileName(action: RepairAction): String =
+        action.destinationPath.substringAfterLast('/')
 
     private fun findStockInstallerPayload(root: DocumentFile): PayloadDirectory? {
         val rootName = root.name.orEmpty()
