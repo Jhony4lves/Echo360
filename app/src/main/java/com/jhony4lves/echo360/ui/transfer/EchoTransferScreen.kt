@@ -806,11 +806,11 @@ private fun SafetyPanel() {
             EchoEyebrow("SAFE TRANSFER")
             MessageInline(
                 icon = Icons.Outlined.CheckCircle,
-                text = "O EchoTransfer não usa DELE nem RMD. Ele envia somente ausentes/diferentes e valida o SIZE remoto após cada arquivo.",
+                text = "O EchoTransfer nunca apaga arquivos do jogo. DELE é restrito aos probes do benchmark Auto; arquivos enviados são validados por SIZE.",
                 color = EchoColors.Mint,
             )
             Text(
-                text = "Se Auto perder a Aurora durante o envio, a sessão Fast é fechada e o arquivo atual recomeça pelo FTPdll.",
+                text = "No Auto, Aurora e FTPdll são medidos antes do envio. Se o vencedor falhar após os retries, o arquivo atual recomeça pelo outro provedor.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
@@ -1013,7 +1013,7 @@ private fun routeCode(route: FtpRoute): String = when (route) {
 }
 
 private fun routeDescription(route: FtpRoute): String = when (route) {
-    FtpRoute.Auto -> "AUTO tenta Aurora primeiro e muda para FTPdll se o Fast falhar."
+    FtpRoute.Auto -> "AUTO mede Aurora e FTPdll antes do envio e usa o mais rápido disponível, com fallback automático se ele falhar."
     FtpRoute.Fast -> "FAST usa o FTP passivo da Aurora para máxima velocidade disponível."
     FtpRoute.Background -> "BACKGROUND usa o FTPdll ativo e continua disponível fora da Aurora."
 }
