@@ -9,13 +9,7 @@ import com.jhony4lves.echo360.network.nova.AuroraNovaClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * Small runtime source contract for frequent foreground title observation.
- *
- * NOVA is the production compatibility source today. Future EchoCore
- * CURRENT_TITLE can implement the same interface after the Xbox-side draft is
- * promoted; it does not need to fabricate NOVA-only Media ID/TU/path fields.
- */
+/** Small runtime source contract for frequent foreground title observation. */
 internal interface CurrentTitleSource {
     suspend fun observe(profile: XboxProfile): CurrentTitleObservation
 }
