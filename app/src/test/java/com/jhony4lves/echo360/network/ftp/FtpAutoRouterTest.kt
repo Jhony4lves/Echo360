@@ -17,8 +17,14 @@ class FtpAutoRouterTest {
     @Test
     fun `Auto selects FTPdll when measured upload is faster`() = runBlocking {
         var clockNanos = 0L
-        val fast = FakeSession(uploadElapsedNanos = 10_000_000L) { clockNanos += it }
-        val background = FakeSession(uploadElapsedNanos = 2_000_000L) { clockNanos += it }
+        val fast = FakeSession(
+            uploadElapsedNanos = 10_000_000L,
+            advanceClock = { clockNanos += it },
+        )
+        val background = FakeSession(
+            uploadElapsedNanos = 2_000_000L,
+            advanceClock = { clockNanos += it },
+        )
         val router = FtpAutoRouter(
             benchmarkBytes = 1024,
             cacheTtlMs = 60_000L,
@@ -40,13 +46,17 @@ class FtpAutoRouterTest {
         assertEquals(1, background.uploadCalls)
         assertEquals(1, fast.deleteCalls)
         assertEquals(1, background.deleteCalls)
-        assertTrue(checkNotNull(routed.benchmark).selected.bytesPerSecond > checkNotNull(routed.benchmark).alternate!!.bytesPerSecond)
+        val benchmark = checkNotNull(routed.benchmark)
+        assertTrue(benchmark.selected.bytesPerSecond > checkNotNull(benchmark.alternate).bytesPerSecond)
     }
 
     @Test
     fun `Auto keeps the only healthy provider`() = runBlocking {
         var clockNanos = 0L
-        val background = FakeSession(uploadElapsedNanos = 2_000_000L) { clockNanos += it }
+        val background = FakeSession(
+            uploadElapsedNanos = 2_000_000L,
+            advanceClock = { clockNanos += it },
+        )
         val router = FtpAutoRouter(
             benchmarkBytes = 1024,
             cacheTtlMs = 60_000L,
