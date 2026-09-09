@@ -17,15 +17,15 @@ import org.junit.Test
 
 class DoctorTelemetrySourceTest {
     @Test
-    fun `partial EchoCore-style read preserves valid memory and unavailable temperature`() = runBlocking {
+    fun `partial source read preserves valid memory and unavailable temperature`() = runBlocking {
         val unavailable = DoctorTelemetryUnavailable(
             component = DoctorTelemetryComponent.Temperature,
-            detail = "native thermal read unavailable",
+            detail = "thermal read unavailable",
         )
         val coordinator = DoctorTelemetryCoordinator(
             source = FakeSource(
                 DoctorTelemetrySourceRead(
-                    origin = DoctorTelemetryOrigin.EchoCore,
+                    origin = DoctorTelemetryOrigin.NovaCompatibility,
                     memory = DoctorMemorySnapshot(
                         freeBytes = 100L,
                         usedBytes = 200L,
@@ -39,7 +39,7 @@ class DoctorTelemetrySourceTest {
 
         val report = coordinator.inspect(XboxProfile(), checkedAtEpochMs = 123L)
 
-        assertEquals(DoctorTelemetryOrigin.EchoCore, report.snapshot.origin)
+        assertEquals(DoctorTelemetryOrigin.NovaCompatibility, report.snapshot.origin)
         assertEquals(100L, report.snapshot.memory?.freeBytes)
         assertNull(report.snapshot.temperature)
         assertEquals(1, report.snapshot.unavailable.size)
@@ -54,7 +54,7 @@ class DoctorTelemetrySourceTest {
         val coordinator = DoctorTelemetryCoordinator(
             source = FakeSource(
                 DoctorTelemetrySourceRead(
-                    origin = DoctorTelemetryOrigin.EchoCore,
+                    origin = DoctorTelemetryOrigin.NovaCompatibility,
                     memory = DoctorMemorySnapshot(
                         freeBytes = 200L,
                         usedBytes = 200L,
