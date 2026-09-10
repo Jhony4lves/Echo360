@@ -186,10 +186,27 @@ class FtpDllActiveFtpSession private constructor(
         canonicalPath: String,
         destination: OutputStream,
         onProgress: (Long) -> Unit,
+    ) = downloadFromOffset(canonicalPath, 0L, destination, onProgress)
+
+    override suspend fun downloadFromOffset(
+        canonicalPath: String,
+        offset: Long,
+        destination: OutputStream,
+        onProgress: (Long) -> Unit,
     ) = mutex.withLock {
         withContext(Dispatchers.IO) {
+            require(offset >= 0L) { "Offset FTP deve ser >= 0." }
             val remote = XboxPath.toFtpDllPath(XboxPath.canonical(canonicalPath))
             prepareActiveListener().use { listener ->
+                if (offset > 0L) {
+                    val rest = channel.command("REST $offset")
+                    if (rest.code != 350) {
+                        throw FtpProtocolException(
+                            rest.code,
+                            ftpReplyMessage("FTPdll recusou REST $offset.", rest),
+                        )
+                    }
+                }
                 channel.send("RETR $remote")
                 requirePreliminary(channel.read(), "FTPdll não iniciou RETR.")
 
