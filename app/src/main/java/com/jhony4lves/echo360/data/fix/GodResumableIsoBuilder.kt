@@ -10,6 +10,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Properties
 
@@ -89,6 +91,15 @@ class GodResumableIsoBuilder(
                     ?.takeIf { it.isCompatible(signature, parts, expectedIsoBytes) }
                     ?: checkpoint
 
+                // The data body can be fully durable even if the FTP control
+                // channel dies before its final 226. In that case the callback
+                // already promoted the checkpoint to the next part, so there is
+                // no reason to retransmit the completed DataNNNN.
+                if (checkpoint.partIndex > index) {
+                    completed = true
+                    break
+                }
+
                 val rawOffset = if (checkpoint.partIndex == index) checkpoint.rawOffset else 0L
                 require(rawOffset in 0L..part.rawSize) {
                     "Checkpoint fora de ${part.name}: $rawOffset / ${part.rawSize}."
@@ -136,15 +147,23 @@ class GodResumableIsoBuilder(
                                 ) {
                                     payloadOutput.flush()
                                     fileOutput.fd.sync()
-                                    saveCheckpoint(
-                                        output,
+                                    val durableCheckpoint = if (absoluteRaw == part.rawSize) {
+                                        Checkpoint(
+                                            signature = signature,
+                                            partIndex = index + 1,
+                                            rawOffset = 0L,
+                                            expectedIsoBytes = expectedIsoBytes,
+                                        )
+                                    } else {
                                         Checkpoint(
                                             signature = signature,
                                             partIndex = index,
                                             rawOffset = absoluteRaw,
                                             expectedIsoBytes = expectedIsoBytes,
-                                        ),
-                                    )
+                                        )
+                                    }
+                                    saveCheckpoint(output, durableCheckpoint)
+                                    checkpoint = durableCheckpoint
                                     lastSavedRaw = absoluteRaw
                                 }
 
@@ -333,12 +352,26 @@ class GodResumableIsoBuilder(
             properties.store(stream, "Echo360 EchoFix resumable GOD checkpoint")
             stream.fd.sync()
         }
-        if (destination.exists() && !destination.delete()) {
-            error("Não foi possível substituir checkpoint antigo do EchoFix.")
+
+        val moved = runCatching {
+            Files.move(
+                temp.toPath(),
+                destination.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+            true
+        }.getOrElse {
+            runCatching {
+                Files.move(
+                    temp.toPath(),
+                    destination.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+                true
+            }.getOrDefault(false)
         }
-        if (!temp.renameTo(destination)) {
-            error("Não foi possível persistir checkpoint do EchoFix.")
-        }
+        require(moved) { "Não foi possível persistir checkpoint do EchoFix." }
     }
 
     companion object {
