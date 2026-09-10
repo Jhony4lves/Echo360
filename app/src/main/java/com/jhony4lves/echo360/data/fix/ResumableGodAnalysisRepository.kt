@@ -23,6 +23,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
+class NotInstallerGodException(message: String) : IllegalArgumentException(message)
+
 /**
  * Long-running GOD analysis path used by the foreground service.
  *
@@ -206,7 +208,7 @@ class ResumableGodAnalysisRepository(
             throw cancelled
         } catch (notInstaller: NotInstallerGodException) {
             // Full image was valid but this recipe does not apply. Keeping many
-            // GB of cache offers no value, so clean it deterministically.
+            // GB of persistent workspace offers no value, so clean it.
             builder.discard(tempIso)
             throw notInstaller
         } catch (error: Throwable) {
@@ -321,7 +323,11 @@ class ResumableGodAnalysisRepository(
         val cutoff = System.currentTimeMillis() - RESUME_MAX_AGE_MS
         tempDirectory().listFiles()?.forEach { file ->
             if (file.lastModified() >= cutoff) return@forEach
-            if (file.name.endsWith(".xiso.partial") || file.name.endsWith(".xiso.partial.resume") || file.name.endsWith(".xiso.partial.resume.tmp")) {
+            if (
+                file.name.endsWith(".xiso.partial") ||
+                file.name.endsWith(".xiso.partial.resume") ||
+                file.name.endsWith(".xiso.partial.resume.tmp")
+            ) {
                 runCatching { file.delete() }
             }
         }
@@ -344,10 +350,17 @@ class ResumableGodAnalysisRepository(
     private fun requireProfile(): XboxProfile = configStore.load()
         ?: error("Configure o Xbox na aba Xbox antes de usar o EchoFix.")
 
-    private fun tempDirectory(): File =
-        File(appContext.externalCacheDir ?: appContext.cacheDir, TEMP_DIRECTORY_NAME).apply {
-            require(mkdirs() || isDirectory) { "Não foi possível criar o cache retomável do EchoFix." }
+    private fun tempDirectory(): File {
+        // This is intentionally app-specific persistent storage, not a cache
+        // directory. Android may evict caches under pressure, which would break
+        // the promise that a 50% GOD can continue from the saved checkpoint.
+        val root = appContext.getExternalFilesDir(null) ?: appContext.filesDir
+        return File(root, TEMP_DIRECTORY_NAME).apply {
+            require(mkdirs() || isDirectory) {
+                "Não foi possível criar o workspace persistente do EchoFix."
+            }
         }
+    }
 
     private fun safeTempName(value: String): String =
         value.replace(Regex("[^A-Za-z0-9._-]"), "_").take(48).ifBlank { "god" }
@@ -358,8 +371,6 @@ class ResumableGodAnalysisRepository(
         bytes >= 1024L -> String.format("%.1f KB", bytes / 1024.0)
         else -> "$bytes B"
     }
-
-    private class NotInstallerGodException(message: String) : IllegalArgumentException(message)
 
     companion object {
         private const val CONTENT_TYPE_GOD = 0x00007000L
