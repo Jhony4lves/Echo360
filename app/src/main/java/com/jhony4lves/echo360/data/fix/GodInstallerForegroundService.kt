@@ -119,8 +119,7 @@ class GodInstallerForegroundService : Service() {
                 }
                 throw cancelled
             } catch (notInstaller: NotInstallerGodException) {
-                val detail = notInstaller.message ?: "Esse GOD não usa a receita FFED2000."
-                store.markNotApplicable(detail)
+                store.markNotApplicable()
                 showTerminalNotification(
                     title = "EchoFix terminou a verificação",
                     text = "${candidate.label} não é um instalador FFED2000 desta receita.",
