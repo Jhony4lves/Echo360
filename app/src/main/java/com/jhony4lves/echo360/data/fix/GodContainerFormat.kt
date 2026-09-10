@@ -35,6 +35,17 @@ object GodContainerFormat {
         return fullCycles * DATA_SPAN_BYTES + min(tail, DATA_SPAN_BYTES)
     }
 
+    /**
+     * Number of payload bytes produced after consuming [rawOffset] bytes of a
+     * single DataNNNN file. This is the inverse bookkeeping EchoFix needs to
+     * truncate a partial XISO to its last durable checkpoint before issuing a
+     * REST + RETR resume request.
+     */
+    fun payloadBytesBeforeRawOffset(rawOffset: Long): Long {
+        require(rawOffset >= 0L) { "Offset bruto do GOD deve ser >= 0." }
+        return payloadBytes(rawOffset)
+    }
+
     fun estimatedIsoBytes(parts: List<GodDataPart>, hasXsfHeader: Boolean): Long {
         val payload = parts.sumOf(GodDataPart::payloadSize)
         return payload + if (hasXsfHeader) 0L else SYNTHETIC_XSF_HEADER_BYTES.toLong()
@@ -81,15 +92,21 @@ object GodContainerFormat {
 }
 
 /**
- * OutputStream that accepts one raw DataNNNN file and forwards only its disc
- * payload bytes to [delegate]. A fresh instance must be created for each part.
+ * OutputStream that accepts raw DataNNNN bytes and forwards only disc payload
+ * bytes to [delegate]. [initialRawPosition] allows the decoder to continue at
+ * an arbitrary FTP REST offset without losing hash-span alignment.
  */
 class GodDataPartPayloadOutputStream(
     private val delegate: OutputStream,
+    initialRawPosition: Long = 0L,
 ) : OutputStream() {
-    private var rawPosition = 0L
+    private var rawPosition = initialRawPosition
     var payloadBytesWritten: Long = 0L
         private set
+
+    init {
+        require(initialRawPosition >= 0L) { "Posição bruta inicial deve ser >= 0." }
+    }
 
     override fun write(value: Int) {
         val single = byteArrayOf(value.toByte())
