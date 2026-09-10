@@ -15,7 +15,6 @@ enum class GodBackgroundJobState {
     Paused,
     Completed,
     Failed,
-    NotApplicable,
 }
 
 data class GodBackgroundJobSnapshot(
@@ -146,13 +145,10 @@ class GodRepairJobStore(context: Context) {
     }
 
     @Synchronized
-    fun markNotApplicable(message: String) {
-        prefs.edit()
-            .putString(KEY_STATE, GodBackgroundJobState.NotApplicable.name)
-            .putString(KEY_MESSAGE, "Esse GOD não usa a receita de instalador FFED2000.")
-            .putString(KEY_ERROR, message)
-            .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
-            .apply()
+    fun markNotApplicable() {
+        // The XISO/checkpoint is already deleted by the analyzer in this case.
+        // There is deliberately no resumable job left for the UI to offer.
+        prefs.edit().clear().commit()
     }
 
     @Synchronized
