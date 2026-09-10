@@ -1,5 +1,10 @@
 package com.jhony4lves.echo360.ui.doctor
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.WarningAmber
@@ -29,6 +36,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,7 +48,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.jhony4lves.echo360.data.fix.GodBackgroundJobState
+import com.jhony4lves.echo360.data.fix.GodInstallerForegroundService
 import com.jhony4lves.echo360.data.fix.GodInstallerRepository
+import com.jhony4lves.echo360.data.fix.GodRepairJobStore
+import com.jhony4lves.echo360.data.fix.ResumableGodAnalysisRepository
 import com.jhony4lves.echo360.domain.fix.GodInstallStatus
 import com.jhony4lves.echo360.domain.fix.GodInstallerExecution
 import com.jhony4lves.echo360.domain.fix.GodInstallerPlan
@@ -55,6 +67,7 @@ import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.components.EchoPanel
 import com.jhony4lves.echo360.ui.components.EchoStatusPill
 import com.jhony4lves.echo360.ui.theme.EchoColors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -62,10 +75,15 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val appContext = context.applicationContext
     val repository = remember(appContext) { GodInstallerRepository(appContext) }
+    val resumableRepository = remember(appContext) { ResumableGodAnalysisRepository(appContext) }
+    val jobStore = remember(appContext) { GodRepairJobStore(appContext) }
     val prefs = remember(appContext) {
         appContext.getSharedPreferences("echo_fix", android.content.Context.MODE_PRIVATE)
     }
     val scope = rememberCoroutineScope()
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
 
     var scanRoot by remember {
         mutableStateOf(
@@ -78,6 +96,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
     var validation by remember { mutableStateOf<GodInstallerValidation?>(null) }
     var execution by remember { mutableStateOf<GodInstallerExecution?>(null) }
     var progress by remember { mutableStateOf<GodRepairProgress?>(null) }
+    var backgroundJob by remember { mutableStateOf(jobStore.snapshot()) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
     var scanning by remember { mutableStateOf(false) }
@@ -87,10 +106,24 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
     var pendingAnalysis by remember { mutableStateOf<GodPackageCandidate?>(null) }
     var confirmInstall by remember { mutableStateOf(false) }
 
-    val busy = scanning || analyzing || validating || installing
+    LaunchedEffect(Unit) {
+        if (backgroundJob.state == GodBackgroundJobState.Running) {
+            GodInstallerForegroundService.ensureRunning(appContext)
+        }
+        while (true) {
+            backgroundJob = jobStore.snapshot()
+            delay(750L)
+        }
+    }
+
+    val backgroundRunning = backgroundJob.state == GodBackgroundJobState.Running
+    val busy = scanning || analyzing || validating || installing || backgroundRunning
 
     fun discardPreparedTemp() {
-        plan?.let { current -> runCatching { repository.discardTemp(current) } }
+        plan?.let { current ->
+            runCatching { resumableRepository.discard(current) }
+            runCatching { repository.discardTemp(current) }
+        }
         plan = null
         validation = null
         execution = null
@@ -123,23 +156,50 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
         }
     }
 
-    fun analyzeGod(candidate: GodPackageCandidate) {
+    fun startBackgroundAnalysis(candidate: GodPackageCandidate) {
         discardPreparedTemp()
         errorMessage = null
         infoMessage = null
+
+        backgroundJob.candidate
+            ?.takeIf { it.headerPath != candidate.headerPath }
+            ?.let { oldCandidate -> runCatching { resumableRepository.discard(oldCandidate) } }
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        GodInstallerForegroundService.startAnalysis(
+            context = appContext,
+            rootPath = scanRoot.trim(),
+            candidate = candidate,
+        )
+        backgroundJob = jobStore.snapshot()
+        infoMessage = "Análise iniciada em segundo plano. Você pode sair do app ou apagar a tela; o checkpoint será salvo durante a reconstrução."
+    }
+
+    fun loadBackgroundResult() {
+        val candidate = backgroundJob.candidate ?: return
         analyzing = true
+        errorMessage = null
+        infoMessage = null
         scope.launch {
             runCatching {
-                repository.analyzeInstallerGod(candidate, FtpRoute.Auto) { progress = it }
+                resumableRepository.analyze(candidate, FtpRoute.Auto) { progress = it }
             }.onSuccess { result ->
                 plan = result
                 validation = null
                 execution = null
                 progress = null
-                infoMessage = "Instalador encontrado dentro do GOD. Revise o plano antes de validar os destinos."
+                jobStore.clear()
+                backgroundJob = jobStore.snapshot()
+                infoMessage = "Instalador encontrado. O resultado retomável foi carregado; revise o plano antes de validar destinos."
             }.onFailure { error ->
                 progress = null
-                errorMessage = error.message ?: "Não foi possível analisar o conteúdo do GOD."
+                errorMessage = error.message ?: "Não foi possível carregar a análise concluída."
             }
             analyzing = false
         }
@@ -177,6 +237,9 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                 execution = result
                 progress = null
                 if (result.succeeded) {
+                    // executePlan removes the XISO; this also removes the tiny
+                    // resumable sidecar checkpoint that belongs to it.
+                    runCatching { resumableRepository.discard(current) }
                     infoMessage = buildString {
                         append(result.installedCount)
                         append(" pacote(s) instalado(s); ")
@@ -203,7 +266,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
 
     EchoPanel(
         modifier = modifier.fillMaxWidth(),
-        highlighted = plan?.canExecute == true,
+        highlighted = plan?.canExecute == true || backgroundRunning,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -226,27 +289,119 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                 }
                 EchoStatusPill(
                     text = when {
+                        backgroundRunning -> "BACKGROUND"
                         installing -> "INSTALLING"
-                        analyzing -> "UNPACKING"
+                        analyzing -> "LOADING"
                         plan?.canExecute == true -> "PLAN OK"
                         else -> "RULE 002"
                     },
-                    active = plan?.canExecute == true,
+                    active = plan?.canExecute == true || backgroundRunning,
                 )
             }
 
             Text(
-                "Para jogos/discos baixados como GOD quando o conteúdo instalável ficou preso dentro do container. O EchoFix reconstrói uma XISO temporária no celular, encontra FFED2000/FFFFFFFF e instala somente os pacotes necessários no Xbox.",
+                "Para jogos/discos baixados como GOD quando o conteúdo instalável ficou preso dentro do container. A reconstrução grande roda em serviço foreground e grava checkpoints retomáveis no celular.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
 
             Text(
-                "O GOD original no Xbox não é apagado, renomeado nem sobrescrito por esta receita.",
+                "Pode sair do app, bloquear a tela ou voltar depois. Se o processo cair, o EchoFix retoma do último checkpoint em vez de começar o GOD do zero.",
                 style = MaterialTheme.typography.labelMedium,
                 color = EchoColors.SignalGreen,
                 fontWeight = FontWeight.SemiBold,
             )
+
+            if (backgroundJob.hasJob) {
+                HorizontalDivider(color = EchoColors.Border)
+                EchoEyebrow("BACKGROUND JOB // ${backgroundJob.state.name.uppercase()}")
+                Text(
+                    backgroundJob.candidate?.label ?: "GOD",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = EchoColors.Text,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    backgroundJob.message.ifBlank { "Trabalho EchoFix salvo." },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = EchoColors.TextSecondary,
+                )
+
+                if (backgroundJob.totalBytes > 0L) {
+                    LinearProgressIndicator(
+                        progress = { backgroundJob.fraction },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(7.dp),
+                        color = EchoColors.NeonGreen,
+                        trackColor = EchoColors.Border,
+                    )
+                    Text(
+                        "${formatGodBytes(backgroundJob.completedBytes)} / ${formatGodBytes(backgroundJob.totalBytes)} • ${(backgroundJob.fraction * 100f).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = EchoColors.TextMuted,
+                    )
+                }
+
+                backgroundJob.error?.let { detail ->
+                    GodFixMessage(
+                        Icons.Outlined.WarningAmber,
+                        "$detail O progresso anterior foi preservado.",
+                        EchoColors.Warning,
+                    )
+                }
+
+                when (backgroundJob.state) {
+                    GodBackgroundJobState.Running -> {
+                        OutlinedButton(
+                            onClick = {
+                                GodInstallerForegroundService.pause(appContext)
+                                backgroundJob = jobStore.snapshot()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Outlined.Pause, contentDescription = null)
+                            Text(" PAUSAR E GUARDAR CHECKPOINT")
+                        }
+                    }
+
+                    GodBackgroundJobState.Paused,
+                    GodBackgroundJobState.Failed,
+                    -> {
+                        Button(
+                            onClick = {
+                                GodInstallerForegroundService.resume(appContext)
+                                backgroundJob = jobStore.snapshot()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EchoColors.NeonGreen,
+                                contentColor = EchoColors.Void,
+                            ),
+                        ) {
+                            Icon(Icons.Outlined.PlayArrow, contentDescription = null)
+                            Text(" RETOMAR DO CHECKPOINT")
+                        }
+                    }
+
+                    GodBackgroundJobState.Completed -> {
+                        Button(
+                            onClick = ::loadBackgroundResult,
+                            enabled = !analyzing,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EchoColors.NeonGreen,
+                                contentColor = EchoColors.Void,
+                            ),
+                        ) {
+                            Icon(Icons.Outlined.CheckCircle, contentDescription = null)
+                            Text(if (analyzing) " CARREGANDO..." else " CARREGAR RESULTADO")
+                        }
+                    }
+
+                    GodBackgroundJobState.Idle -> Unit
+                }
+            }
 
             OutlinedTextField(
                 value = scanRoot,
@@ -450,15 +605,15 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
 
                 OutlinedButton(
                     onClick = {
-                        val deleted = repository.discardTemp(current)
+                        val deleted = resumableRepository.discard(current) || repository.discardTemp(current)
                         plan = null
                         validation = null
                         execution = null
                         progress = null
                         infoMessage = if (deleted) {
-                            "Cache temporário descartado. O GOD no Xbox não foi alterado."
+                            "Cache temporário e checkpoint descartados. O GOD no Xbox não foi alterado."
                         } else {
-                            "Não foi possível remover o cache temporário agora."
+                            "Não foi possível remover todo o cache temporário agora."
                         }
                     },
                     enabled = !busy,
@@ -550,16 +705,16 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
             title = { Text("Analisar este GOD?") },
             text = {
                 Text(
-                    "O EchoFix vai ler os DataNNNN do Xbox e reconstruir uma XISO temporária no cache do celular. Pode usar até aproximadamente ${formatGodBytes(candidate.estimatedIsoBytes)} e transferir vários GB pela rede. O GOD original permanecerá intacto. Continuar?",
+                    "O EchoFix vai reconstruir uma XISO temporária no celular, mas agora o trabalho roda em segundo plano e grava checkpoint a cada poucos MB. Você pode sair do app ou bloquear a tela. Se o processo cair, a próxima execução continua do checkpoint salvo. Pode usar até aproximadamente ${formatGodBytes(candidate.estimatedIsoBytes)}. O GOD original permanecerá intacto. Continuar?",
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         pendingAnalysis = null
-                        analyzeGod(candidate)
+                        startBackgroundAnalysis(candidate)
                     },
-                ) { Text("ANALISAR") }
+                ) { Text("ANALISAR EM SEGUNDO PLANO") }
             },
             dismissButton = {
                 TextButton(onClick = { pendingAnalysis = null }) { Text("CANCELAR") }
