@@ -42,6 +42,43 @@ class GodContainerFormatTest {
     }
 
     @Test
+    fun `resumed decoder continues correctly from arbitrary raw REST offset`() {
+        val firstSpan = ByteArray(GodContainerFormat.DATA_SPAN_BYTES.toInt()) { index ->
+            (index xor 0x5A).toByte()
+        }
+        val secondSpan = ByteArray(90_000) { index -> (index * 17).toByte() }
+        val raw = ByteArrayOutputStream().apply {
+            write(ByteArray(GodContainerFormat.PART_PREFIX_BYTES.toInt()) { 0x11 })
+            write(firstSpan)
+            write(ByteArray(GodContainerFormat.HASH_SPAN_BYTES.toInt()) { 0x22 })
+            write(secondSpan)
+        }.toByteArray()
+        val expectedPayload = firstSpan + secondSpan
+
+        val rawResumeOffset = GodContainerFormat.PART_PREFIX_BYTES +
+            GodContainerFormat.DATA_SPAN_BYTES +
+            (GodContainerFormat.HASH_SPAN_BYTES / 2L)
+        val alreadyProduced = GodContainerFormat.payloadBytesBeforeRawOffset(rawResumeOffset)
+        assertEquals(GodContainerFormat.DATA_SPAN_BYTES, alreadyProduced)
+
+        val recoveredTail = ByteArrayOutputStream()
+        val decoder = GodDataPartPayloadOutputStream(
+            delegate = recoveredTail,
+            initialRawPosition = rawResumeOffset,
+        )
+        decoder.write(
+            raw,
+            rawResumeOffset.toInt(),
+            raw.size - rawResumeOffset.toInt(),
+        )
+        decoder.flush()
+
+        val expectedTail = expectedPayload.copyOfRange(alreadyProduced.toInt(), expectedPayload.size)
+        assertArrayEquals(expectedTail, recoveredTail.toByteArray())
+        assertEquals(expectedTail.size.toLong(), decoder.payloadBytesWritten)
+    }
+
+    @Test
     fun `payload size handles prefix only and partial spans`() {
         assertEquals(0L, GodContainerFormat.payloadBytes(0L))
         assertEquals(0L, GodContainerFormat.payloadBytes(GodContainerFormat.PART_PREFIX_BYTES))
@@ -55,6 +92,15 @@ class GodContainerFormatTest {
                 GodContainerFormat.PART_PREFIX_BYTES +
                     GodContainerFormat.DATA_SPAN_BYTES +
                     GodContainerFormat.HASH_SPAN_BYTES,
+            ),
+        )
+        assertEquals(
+            GodContainerFormat.DATA_SPAN_BYTES + 321L,
+            GodContainerFormat.payloadBytesBeforeRawOffset(
+                GodContainerFormat.PART_PREFIX_BYTES +
+                    GodContainerFormat.DATA_SPAN_BYTES +
+                    GodContainerFormat.HASH_SPAN_BYTES +
+                    321L,
             ),
         )
     }
