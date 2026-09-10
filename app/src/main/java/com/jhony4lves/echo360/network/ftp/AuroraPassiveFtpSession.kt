@@ -149,10 +149,27 @@ class AuroraPassiveFtpSession private constructor(
         canonicalPath: String,
         destination: OutputStream,
         onProgress: (Long) -> Unit,
+    ) = downloadFromOffset(canonicalPath, 0L, destination, onProgress)
+
+    override suspend fun downloadFromOffset(
+        canonicalPath: String,
+        offset: Long,
+        destination: OutputStream,
+        onProgress: (Long) -> Unit,
     ) = mutex.withLock {
         withContext(Dispatchers.IO) {
+            require(offset >= 0L) { "Offset FTP deve ser >= 0." }
             val remote = XboxPath.toAuroraFtpPath(XboxPath.canonical(canonicalPath))
             openPassiveSocket().use { dataSocket ->
+                if (offset > 0L) {
+                    val rest = channel.command("REST $offset")
+                    if (rest.code != 350) {
+                        throw FtpProtocolException(
+                            rest.code,
+                            "Aurora recusou REST $offset: ${rest.lines.firstOrNull().orEmpty()}",
+                        )
+                    }
+                }
                 channel.send("RETR $remote")
                 expectPreliminary(channel.read(), "Aurora não iniciou RETR.")
                 dataSocket.getInputStream().use { input ->
