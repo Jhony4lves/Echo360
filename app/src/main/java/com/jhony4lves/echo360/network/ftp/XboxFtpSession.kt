@@ -62,6 +62,29 @@ interface XboxFtpSession {
         onProgress: (Long) -> Unit = {},
     )
 
+    /**
+     * Continues a remote download from [offset] using FTP REST + RETR when the
+     * provider supports restart markers. The callback reports bytes received in
+     * this resumed request, not the absolute remote offset.
+     *
+     * EchoFix uses this for crash-safe GOD reconstruction: the local XISO is
+     * checkpointed, and a restarted process asks the Xbox only for bytes after
+     * the last durable checkpoint instead of retransferring the whole DataNNNN.
+     */
+    suspend fun downloadFromOffset(
+        canonicalPath: String,
+        offset: Long,
+        destination: OutputStream,
+        onProgress: (Long) -> Unit = {},
+    ) {
+        require(offset >= 0L) { "Offset FTP deve ser >= 0." }
+        if (offset == 0L) {
+            download(canonicalPath, destination, onProgress)
+        } else {
+            throw UnsupportedOperationException("REST/RETR não suportado por esta sessão FTP.")
+        }
+    }
+
     suspend fun close()
 }
 
