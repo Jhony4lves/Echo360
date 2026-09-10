@@ -15,6 +15,7 @@ enum class GodBackgroundJobState {
     Paused,
     Completed,
     Failed,
+    NotApplicable,
 }
 
 data class GodBackgroundJobSnapshot(
@@ -75,7 +76,7 @@ class GodRepairJobStore(context: Context) {
 
     @Synchronized
     fun begin(rootPath: String, candidate: GodPackageCandidate) {
-        prefs.edit()
+        val persisted = prefs.edit()
             .putString(KEY_STATE, GodBackgroundJobState.Running.name)
             .putString(KEY_ROOT, rootPath)
             .putString(KEY_CANDIDATE, encodeCandidate(candidate))
@@ -85,7 +86,8 @@ class GodRepairJobStore(context: Context) {
             .putLong(KEY_TOTAL, candidate.rawDataBytes)
             .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
             .remove(KEY_ERROR)
-            .apply()
+            .commit()
+        require(persisted) { "Não foi possível persistir o trabalho EchoFix antes de iniciar." }
     }
 
     @Synchronized
@@ -138,6 +140,16 @@ class GodRepairJobStore(context: Context) {
         prefs.edit()
             .putString(KEY_STATE, GodBackgroundJobState.Failed.name)
             .putString(KEY_MESSAGE, "A análise parou, mas o checkpoint foi preservado.")
+            .putString(KEY_ERROR, message)
+            .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    @Synchronized
+    fun markNotApplicable(message: String) {
+        prefs.edit()
+            .putString(KEY_STATE, GodBackgroundJobState.NotApplicable.name)
+            .putString(KEY_MESSAGE, "Esse GOD não usa a receita de instalador FFED2000.")
             .putString(KEY_ERROR, message)
             .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
             .apply()
