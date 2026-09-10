@@ -44,21 +44,24 @@ class GodResumableIsoBuilder(
         output.parentFile?.mkdirs()
 
         val signature = signature(parts, hasXsfHeader, expectedIsoBytes)
-        var checkpoint = loadCheckpoint(output)
+        val loadedCheckpoint = loadCheckpoint(output)
             ?.takeIf { it.isCompatible(signature, parts, expectedIsoBytes) }
 
-        if (checkpoint == null || !isOutputCompatible(output, checkpoint, parts, hasXsfHeader)) {
+        var checkpoint: Checkpoint = if (
+            loadedCheckpoint == null ||
+            !isOutputCompatible(output, loadedCheckpoint, parts, hasXsfHeader)
+        ) {
             resetOutput(output, hasXsfHeader)
-            checkpoint = Checkpoint(
+            Checkpoint(
                 signature = signature,
                 partIndex = 0,
                 rawOffset = 0L,
                 expectedIsoBytes = expectedIsoBytes,
-            )
-            saveCheckpoint(output, checkpoint)
+            ).also { saveCheckpoint(output, it) }
         } else {
-            val durableLength = outputLengthAt(checkpoint, parts, hasXsfHeader)
+            val durableLength = outputLengthAt(loadedCheckpoint, parts, hasXsfHeader)
             RandomAccessFile(output, "rw").use { it.setLength(durableLength) }
+            loadedCheckpoint
         }
 
         ensureAdditionalSpace((expectedIsoBytes - output.length()).coerceAtLeast(0L))
