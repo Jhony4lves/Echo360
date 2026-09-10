@@ -36,7 +36,7 @@ class GodInstallerForegroundService : Service() {
     private var activeJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var pauseRequested = false
-    private var lastNotificationAt = 0L
+    private var lastProgressPersistAt = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -94,6 +94,7 @@ class GodInstallerForegroundService : Service() {
         }
 
         pauseRequested = false
+        lastProgressPersistAt = 0L
         store.markRunning(snapshot.message.ifBlank { "Preparando análise em segundo plano..." })
         startAsForeground(snapshot)
         acquireWakeLock()
@@ -105,8 +106,7 @@ class GodInstallerForegroundService : Service() {
                     candidate = candidate,
                     requestedRoute = FtpRoute.Auto,
                 ) { progress ->
-                    store.updateProgress(progress)
-                    maybeUpdateNotification(progress)
+                    persistProgressAndNotify(progress)
                 }
                 store.markCompleted()
                 showTerminalNotification(
@@ -118,6 +118,13 @@ class GodInstallerForegroundService : Service() {
                     store.markPaused()
                 }
                 throw cancelled
+            } catch (notInstaller: NotInstallerGodException) {
+                val detail = notInstaller.message ?: "Esse GOD não usa a receita FFED2000."
+                store.markNotApplicable(detail)
+                showTerminalNotification(
+                    title = "EchoFix terminou a verificação",
+                    text = "${candidate.label} não é um instalador FFED2000 desta receita.",
+                )
             } catch (error: Throwable) {
                 val detail = error.message ?: error::class.java.simpleName
                 store.markFailed(detail)
@@ -135,6 +142,18 @@ class GodInstallerForegroundService : Service() {
         }
     }
 
+    private fun persistProgressAndNotify(progress: GodRepairProgress) {
+        val now = System.currentTimeMillis()
+        val finishedStage = progress.totalBytes > 0L && progress.completedBytes >= progress.totalBytes
+        if (!finishedStage && now - lastProgressPersistAt < PROGRESS_PERSIST_THROTTLE_MS) return
+
+        lastProgressPersistAt = now
+        store.updateProgress(progress)
+        val snapshot = store.snapshot()
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildNotification(snapshot, ongoing = true))
+    }
+
     private fun startAsForeground(snapshot: GodBackgroundJobSnapshot) {
         val notification = buildNotification(snapshot, ongoing = true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -146,17 +165,6 @@ class GodInstallerForegroundService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-    }
-
-    private fun maybeUpdateNotification(progress: GodRepairProgress) {
-        val now = System.currentTimeMillis()
-        if (now - lastNotificationAt < NOTIFICATION_THROTTLE_MS && progress.completedBytes < progress.totalBytes) {
-            return
-        }
-        lastNotificationAt = now
-        val snapshot = store.snapshot()
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, buildNotification(snapshot, ongoing = true))
     }
 
     private fun showTerminalNotification(title: String, text: String) {
@@ -260,6 +268,17 @@ class GodInstallerForegroundService : Service() {
         wakeLock = null
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        pauseRequested = true
+        store.markPaused(
+            "O Android encerrou a janela do serviço de sincronização. O checkpoint foi preservado; abra o Echo360 para retomar.",
+        )
+        activeJob?.cancel()
+        releaseWakeLock()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
+    }
+
     override fun onDestroy() {
         releaseWakeLock()
         scope.cancel()
@@ -273,7 +292,7 @@ class GodInstallerForegroundService : Service() {
         private const val NOTIFICATION_ID = 3602
         private const val REQUEST_OPEN = 36020
         private const val REQUEST_PAUSE = 36021
-        private const val NOTIFICATION_THROTTLE_MS = 750L
+        private const val PROGRESS_PERSIST_THROTTLE_MS = 750L
         private const val WAKE_LOCK_TIMEOUT_MS = 6L * 60L * 60L * 1000L
 
         private const val ACTION_START = "com.jhony4lves.echo360.echofix.START_GOD_ANALYSIS"
