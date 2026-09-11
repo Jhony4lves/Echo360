@@ -3,9 +3,9 @@ package com.jhony4lves.echo360.data.fix
 import com.jhony4lves.echo360.domain.fix.GodDataPart
 import com.jhony4lves.echo360.domain.fix.GodPackageCandidate
 import com.jhony4lves.echo360.domain.fix.StfsMetadata
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Test
 
 class GodInstallerVerdictStoreTest {
     @Test
