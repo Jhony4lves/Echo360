@@ -119,10 +119,13 @@ class GodInstallerForegroundService : Service() {
                 }
                 throw cancelled
             } catch (notInstaller: NotInstallerGodException) {
+                runCatching {
+                    GodInstallerVerdictStore(applicationContext).markNonInstaller(candidate)
+                }
                 store.markNotApplicable()
                 showTerminalNotification(
                     title = "EchoFix terminou a verificação",
-                    text = "${candidate.label} não é um instalador FFED2000 desta receita.",
+                    text = "${candidate.label} não é um instalador FFED2000 desta receita e será ocultado dos próximos scans enquanto permanecer igual.",
                 )
             } catch (error: Throwable) {
                 val detail = error.message ?: error::class.java.simpleName
