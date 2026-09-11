@@ -14,6 +14,7 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import java.util.Properties
+import kotlinx.coroutines.CancellationException
 
 /**
  * Crash-safe GOD -> XISO reconstructor.
@@ -115,7 +116,9 @@ class GodResumableIsoBuilder(
                 )
                 RandomAccessFile(output, "rw").use { it.setLength(durableLength) }
 
-                val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
+                val routedAttempt = runCatchingPreservingCancellation {
+                    sessionFactory.connect(profile, route)
+                }
                 if (routedAttempt.isFailure) {
                     lastFailure = routedAttempt.exceptionOrNull()
                     continue
@@ -128,7 +131,7 @@ class GodResumableIsoBuilder(
                     val expectedRemainingPayload = part.payloadSize -
                         GodContainerFormat.payloadBytesBeforeRawOffset(rawOffset)
 
-                    val attempt = runCatching {
+                    val attempt = runCatchingPreservingCancellation {
                         FileOutputStream(output, true).use { fileOutput ->
                             val payloadOutput = GodDataPartPayloadOutputStream(
                                 delegate = fileOutput,
@@ -392,3 +395,12 @@ class GodResumableIsoBuilder(
         val expectedIsoBytes: Long,
     )
 }
+
+private inline fun <T> runCatchingPreservingCancellation(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Throwable) {
+        Result.failure(error)
+    }
