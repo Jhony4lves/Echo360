@@ -40,6 +40,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,7 +77,8 @@ fun XboxSystemScreen(
     val store = remember(context) { SecureXboxConfigStore(context) }
     val repository = remember { XboxConnectionRepository() }
     val scope = rememberCoroutineScope()
-    val initial = remember { store.load() ?: XboxProfile() }
+    val savedProfile = remember { store.load() }
+    val initial = remember { savedProfile ?: XboxProfile() }
 
     var host by remember { mutableStateOf(initial.endpoint.host) }
     var novaPort by remember { mutableStateOf(initial.endpoint.novaPort.toString()) }
@@ -147,6 +149,18 @@ fun XboxSystemScreen(
             }.getOrNull()
             isTesting = false
         }
+    }
+
+    LaunchedEffect(savedProfile) {
+        val profile = savedProfile ?: return@LaunchedEffect
+        isTesting = true
+        message = null
+        snapshot = runCatching {
+            repository.check(profile)
+        }.onFailure {
+            message = "Xbox salvo, mas a rede não respondeu ao teste automático agora."
+        }.getOrNull()
+        isTesting = false
     }
 
     LazyColumn(
