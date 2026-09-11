@@ -41,6 +41,7 @@ class GodInstallerRepository(
 ) {
     private val appContext = context.applicationContext
     private val configStore = SecureXboxConfigStore(appContext)
+    private val verdictStore = GodInstallerVerdictStore(appContext)
 
     suspend fun scanGodPackages(
         rootCanonicalPath: String = DEFAULT_GOD_ROOT,
@@ -52,6 +53,7 @@ class GodInstallerRepository(
         val root = XboxPath.canonical(rootCanonicalPath)
         val issues = mutableListOf<RepairIssue>()
         val candidates = mutableListOf<GodPackageCandidate>()
+        var hiddenKnownNonInstallers = 0
 
         onProgress(
             GodRepairProgress(
@@ -158,7 +160,7 @@ class GodInstallerRepository(
                         )
                     }
 
-                    candidates += GodPackageCandidate(
+                    val candidate = GodPackageCandidate(
                         titleIdDirectory = titleDirectory,
                         packageName = packageFile.name,
                         headerPath = packageFile.canonicalPath,
@@ -169,11 +171,27 @@ class GodInstallerRepository(
                         estimatedIsoBytes = parts.sumOf(GodDataPart::payloadSize) +
                             GodContainerFormat.SYNTHETIC_XSF_HEADER_BYTES,
                     )
+
                     processed += 1
+                    if (verdictStore.isKnownNonInstaller(candidate)) {
+                        hiddenKnownNonInstallers += 1
+                    } else {
+                        candidates += candidate
+                    }
+
                     onProgress(
                         GodRepairProgress(
                             stage = GodRepairStage.ReadingContainer,
-                            message = "${candidates.size} GOD(s) encontrado(s)...",
+                            message = buildString {
+                                append(candidates.size)
+                                append(" GOD(s) candidato(s)")
+                                if (hiddenKnownNonInstallers > 0) {
+                                    append(" • ")
+                                    append(hiddenKnownNonInstallers)
+                                    append(" já descartado(s)")
+                                }
+                                append("...")
+                            },
                             completedBytes = processed,
                             totalBytes = maxOf(processed, godDirectories.size.toLong()),
                         ),
@@ -184,10 +202,22 @@ class GodInstallerRepository(
             runCatching { routed.session.close() }
         }
 
+        if (hiddenKnownNonInstallers > 0) {
+            issues += RepairIssue(
+                severity = RepairSeverity.Info,
+                message = "$hiddenKnownNonInstallers GOD(s) já analisado(s) e confirmado(s) como não instalador foram ocultados. Se os arquivos mudarem, eles reaparecem automaticamente.",
+                sourcePath = root,
+            )
+        }
+
         if (candidates.isEmpty()) {
             issues += RepairIssue(
                 severity = RepairSeverity.Info,
-                message = "Nenhum pacote GOD com arquivo .data foi encontrado em $root.",
+                message = if (hiddenKnownNonInstallers > 0) {
+                    "Nenhum novo GOD candidato foi encontrado em $root."
+                } else {
+                    "Nenhum pacote GOD com arquivo .data foi encontrado em $root."
+                },
                 sourcePath = root,
             )
         }
