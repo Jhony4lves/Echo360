@@ -44,7 +44,7 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
                             fontWeight = FontWeight.Black,
                         )
                     }
-                    EchoStatusPill(text = "READ ONLY", active = true)
+                    EchoStatusPill(text = "EVIDENCE FIRST", active = true)
                 }
                 Spacer(Modifier.height(7.dp))
                 Text(
@@ -56,13 +56,26 @@ fun EchoDoctorScreen(modifier: Modifier = Modifier) {
         }
 
         item { DoctorFullScanSection() }
+        item { XboxEchoFixSection() }
+        item { GodInstallerEchoFixSection() }
+
+        item {
+            Text(
+                "ORIGEM ALTERNATIVA // ANDROID",
+                style = MaterialTheme.typography.labelMedium,
+                color = EchoColors.TextMuted,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        item { EchoFixSection() }
+
         item { DashLaunchDoctorSection() }
         item { DoctorTelemetrySection() }
         item { DoctorStorageSection() }
 
         item {
             Text(
-                "Phase atual: diagnóstico read-only. Alterações de plugin/configuração só serão adicionadas com backup e rollback explícitos.",
+                "EchoFix prioriza o Xbox: primeiro corrige payloads já expostos com move server-side; quando o instalador está preso em GOD, a receita GOD reconstrói uma XISO temporária no cache do app, extrai somente o conteúdo necessário e mantém o GOD original intacto. A origem Android permanece como alternativa.",
                 style = MaterialTheme.typography.labelMedium,
                 color = EchoColors.TextMuted,
             )

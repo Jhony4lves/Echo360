@@ -380,7 +380,6 @@ private fun storageStatus(report: DoctorStorageReport?, loading: Boolean): Strin
 private fun originLabel(origin: DoctorStorageOrigin): String = when (origin) {
     DoctorStorageOrigin.AuroraFtpCompatibility -> "AURORA FTP"
     DoctorStorageOrigin.FtpDllCompatibility -> "FTPDLL"
-    DoctorStorageOrigin.EchoCore -> "ECHOCORE"
     DoctorStorageOrigin.Unavailable -> "UNAVAILABLE"
 }
 

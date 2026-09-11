@@ -2,7 +2,7 @@
 
 ## Product shape
 
-Echo360 is moving to a native Android app with Xbox-specific transports hidden behind domain interfaces.
+Echo360 is a native Android management layer for the user's Xbox 360 RGH. The active design deliberately keeps the Android app independent from any resident custom XEX.
 
 ```text
 Compose UI
@@ -13,47 +13,51 @@ Domain / use cases
    ↓
 Xbox gateway interfaces
    ↓
-Aurora NOVA | Aurora FTP | FTPdll | future EchoCore
+Aurora NOVA | Aurora FTP | FTPdll
 ```
 
-The UI must never know whether a file transfer is using Aurora FTP or FTPdll. It requests a transfer policy; the transport layer decides how to satisfy it.
+The UI must never know which FTP implementation is carrying a transfer. It requests a transfer policy; the transport layer selects and verifies the concrete provider.
 
-## Planned boundaries
+## Active transport policy
+
+- Aurora passive FTP and FTPdll active FTP are the supported file transports.
+- `Auto` measures real transfer throughput and can fail over at safe boundaries.
+- Aurora NOVA is used only for capabilities it actually exposes.
+- Canonical paths use Xbox-style names such as `/Hdd1/...`; provider adapters translate to transport-specific namespaces such as `/fHdd/...` when required.
+- File repair, diagnostics and automation live outside the console whenever possible.
+
+## Resident Xbox code
+
+The earlier EchoCore / EchoLink resident-service direction is **retired from the active architecture**. Real-console experiments produced black-screen/runtime fragility and closed-service behavior that made a resident dependency a worse tradeoff than the already working Aurora/FTPDll stack.
+
+Historical source and protocol notes may remain in the repository for research. They are not part of the APK or active CI and are not required for Echo360 to work.
+
+A future Xbox-side helper may be reconsidered only as an optional, on-demand component after isolated hardware proof. It must never become a boot requirement without a separately reviewed stability case.
+
+## Boundaries
 
 ### `app`
 Android entry point, navigation, dependency assembly and top-level design system.
 
-### `feature:home`
-Game-first launcher surface: continue playing, recent games, console state and quick actions.
+### Home / Library
+Game-first launcher surfaces, catalog, metadata, sessions and launch actions.
 
-### `feature:library`
-Game catalog, metadata, filters, favorites, sessions and launch actions.
+### Transfer
+Compare, transfer plan, progress, retry, verification, history and Aurora/FTPDll routing.
 
-### `feature:transfer`
-Compare, transfer plan, progress, retry, verification, history and Fast/Background/Auto routing.
+### Doctor / Integrity / Fix
+Evidence-first diagnostics, content integrity and repair recipes. Repairs must expose a plan before mutation and verify destinations after mutation.
 
-### `feature:doctor`
-Rules-based diagnostics that consume normalized console/game state instead of raw FTP responses.
+### Sync / Vault
+Read-only snapshot and local integrity features.
 
-### `core:model`
-Stable models such as Xbox status, game identity, storage entries, transfer plan and diagnostic finding.
-
-### `core:network`
-Connection policies, timeouts, discovery and shared network primitives.
-
-### `protocol:aurora`
-NOVA HTTP/JWT and Aurora FTP behavior.
-
-### `protocol:ftpdll`
-FTPdll active-mode behavior and Xbox path translation.
-
-### `protocol:echocore`
-Future first-party protocol used once `EchoCore.xex` exists.
+### Network
+Connection policies, timeouts, discovery, NOVA and FTP provider implementations.
 
 ## Credential policy
 
-Real credentials are never source-controlled. During early migration they remain local-only. Before the native protocol milestone, Android credentials move to encrypted/private app storage.
+Real credentials and console-unique secrets are never source-controlled. Android stores connection configuration locally and privately.
 
 ## Migration rule
 
-A legacy Companion capability is considered migrated only after the native implementation is validated against real Xbox hardware.
+A capability is considered migrated only after the native implementation is validated against the real Xbox hardware. CI proves software behavior, not console compatibility.

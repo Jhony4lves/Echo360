@@ -179,7 +179,7 @@ fun EchoPlayerHomeScreen(
                         )
                         Text(
                             if (configured) {
-                                "EchoCore, NOVA, Aurora FTP e FTPdll coexistem pela camada nativa."
+                                "NOVA, Aurora FTP e FTPdll formam a camada de conexão externa."
                             } else {
                                 "IP, NOVA e FTP ficam protegidos pelo Android Keystore."
                             },
@@ -331,7 +331,7 @@ fun EchoPlayerHomeScreen(
                 QuickTile(
                     code = "TX",
                     title = "Transfer",
-                    subtitle = "Fast / Background / Auto",
+                    subtitle = "Aurora / FTPdll / Auto",
                     modifier = Modifier.weight(1f),
                     onClick = onOpenTransfer,
                 )
@@ -371,7 +371,6 @@ fun EchoPlayerHomeScreen(
 
 private fun currentTitleSourceLabel(origin: CurrentTitleOrigin?): String = when (origin) {
     CurrentTitleOrigin.NovaCompatibility -> "NOVA"
-    CurrentTitleOrigin.EchoCore -> "ECHOCORE"
     null -> "SOURCE"
 }
 

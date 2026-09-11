@@ -8,7 +8,6 @@ import com.jhony4lves.echo360.domain.doctor.DoctorScanComponent
 import com.jhony4lves.echo360.domain.doctor.DoctorScanComponentSummary
 import com.jhony4lves.echo360.domain.doctor.DoctorStorageOrigin
 import com.jhony4lves.echo360.domain.doctor.DoctorStorageReport
-import com.jhony4lves.echo360.domain.doctor.DoctorTelemetryOrigin
 import com.jhony4lves.echo360.domain.doctor.DoctorTelemetryReport
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -72,10 +71,6 @@ internal object DoctorFullScanSummaryMapper {
             snapshot.unavailable.isNotEmpty() -> DoctorScanAvailability.Partial
             else -> DoctorScanAvailability.Available
         }
-        val source = when (snapshot.origin) {
-            DoctorTelemetryOrigin.NovaCompatibility -> "NOVA"
-            DoctorTelemetryOrigin.EchoCore -> "EchoCore"
-        }
         val components = buildList {
             if (hasMemory) add("RAM")
             if (hasTemperature) add("THERMALS")
@@ -87,7 +82,7 @@ internal object DoctorFullScanSummaryMapper {
             errors = report.errors,
             warnings = report.warnings,
             info = report.info,
-            detail = "$source • $components" +
+            detail = "NOVA • $components" +
                 snapshot.unavailable.takeIf { it.isNotEmpty() }?.let { " • ${it.size} fonte(s) parcial(is)" }.orEmpty(),
         )
     }
@@ -103,7 +98,6 @@ internal object DoctorFullScanSummaryMapper {
         val source = when (snapshot.origin) {
             DoctorStorageOrigin.AuroraFtpCompatibility -> "Aurora FTP"
             DoctorStorageOrigin.FtpDllCompatibility -> "FTPdll"
-            DoctorStorageOrigin.EchoCore -> "EchoCore"
             DoctorStorageOrigin.Unavailable -> "indisponível"
         }
         val detail = when {

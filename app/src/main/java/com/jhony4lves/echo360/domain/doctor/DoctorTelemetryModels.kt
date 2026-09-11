@@ -5,7 +5,6 @@ import com.jhony4lves.echo360.domain.integrity.IntegritySeverity
 
 enum class DoctorTelemetryOrigin {
     NovaCompatibility,
-    EchoCore,
 }
 
 enum class DoctorTemperatureUnit {

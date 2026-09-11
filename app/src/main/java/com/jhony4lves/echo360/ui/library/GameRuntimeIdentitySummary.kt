@@ -34,7 +34,6 @@ import com.jhony4lves.echo360.domain.doctor.RuntimeIdentityAnalyzer
 import com.jhony4lves.echo360.domain.doctor.RuntimeIdentityReport
 import com.jhony4lves.echo360.domain.integrity.IntegrityFinding
 import com.jhony4lves.echo360.domain.integrity.IntegritySeverity
-import com.jhony4lves.echo360.domain.library.CurrentTitleOrigin
 import com.jhony4lves.echo360.domain.library.GameEntry
 import com.jhony4lves.echo360.ui.components.EchoEyebrow
 import com.jhony4lves.echo360.ui.components.EchoPanel
@@ -110,14 +109,7 @@ internal fun GameRuntimeIdentitySummary(game: GameEntry) {
             current?.observation?.let { observation ->
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     RuntimeMetric("TITLE", hex(observation.titleId), Modifier.weight(1f))
-                    RuntimeMetric(
-                        "FONTE",
-                        when (observation.origin) {
-                            CurrentTitleOrigin.NovaCompatibility -> "NOVA"
-                            CurrentTitleOrigin.EchoCore -> "ECHOCORE"
-                        },
-                        Modifier.weight(1f),
-                    )
+                    RuntimeMetric("FONTE", "NOVA", Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     RuntimeMetric("MID LIB", current.selectedMediaId?.let(::hex) ?: "—", Modifier.weight(1f))
