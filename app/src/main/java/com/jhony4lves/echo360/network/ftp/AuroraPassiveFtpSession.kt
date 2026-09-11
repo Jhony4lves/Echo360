@@ -69,14 +69,30 @@ class AuroraPassiveFtpSession private constructor(
     override suspend fun readPrefixAndClose(
         canonicalPath: String,
         byteCount: Int,
+    ): ByteArray = readRangeAndClose(canonicalPath, 0L, byteCount)
+
+    override suspend fun readRangeAndClose(
+        canonicalPath: String,
+        offset: Long,
+        byteCount: Int,
     ): ByteArray = mutex.withLock {
         withContext(Dispatchers.IO) {
+            require(offset >= 0L) { "Offset FTP deve ser >= 0." }
             require(byteCount > 0) { "byteCount deve ser maior que zero." }
             val remote = XboxPath.toAuroraFtpPath(XboxPath.canonical(canonicalPath))
             val output = ByteArrayOutputStream(byteCount.coerceAtMost(64 * 1024))
 
             try {
                 openPassiveSocket().use { dataSocket ->
+                    if (offset > 0L) {
+                        val rest = channel.command("REST $offset")
+                        if (rest.code != 350) {
+                            throw FtpProtocolException(
+                                rest.code,
+                                "Aurora recusou REST $offset: ${rest.lines.firstOrNull().orEmpty()}",
+                            )
+                        }
+                    }
                     channel.send("RETR $remote")
                     expectPreliminary(channel.read(), "Aurora não iniciou RETR parcial.")
                     val input = dataSocket.getInputStream()
@@ -92,6 +108,9 @@ class AuroraPassiveFtpSession private constructor(
                 }
                 output.toByteArray()
             } finally {
+                // A bounded RETR intentionally ends before the remote file. Do
+                // not attempt to reuse this control channel after the data
+                // socket closes; the server may still emit 426/226.
                 channel.closeImmediately()
             }
         }

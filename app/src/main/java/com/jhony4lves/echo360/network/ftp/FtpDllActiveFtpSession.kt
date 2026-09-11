@@ -84,14 +84,30 @@ class FtpDllActiveFtpSession private constructor(
     override suspend fun readPrefixAndClose(
         canonicalPath: String,
         byteCount: Int,
+    ): ByteArray = readRangeAndClose(canonicalPath, 0L, byteCount)
+
+    override suspend fun readRangeAndClose(
+        canonicalPath: String,
+        offset: Long,
+        byteCount: Int,
     ): ByteArray = mutex.withLock {
         withContext(Dispatchers.IO) {
+            require(offset >= 0L) { "Offset FTP deve ser >= 0." }
             require(byteCount > 0) { "byteCount deve ser maior que zero." }
             val remote = XboxPath.toFtpDllPath(XboxPath.canonical(canonicalPath))
             val output = ByteArrayOutputStream(byteCount.coerceAtMost(64 * 1024))
 
             try {
                 prepareActiveListener().use { listener ->
+                    if (offset > 0L) {
+                        val rest = channel.command("REST $offset")
+                        if (rest.code != 350) {
+                            throw FtpProtocolException(
+                                rest.code,
+                                ftpReplyMessage("FTPdll recusou REST $offset.", rest),
+                            )
+                        }
+                    }
                     channel.send("RETR $remote")
                     requirePreliminary(channel.read(), "FTPdll não iniciou RETR parcial.")
 
@@ -117,6 +133,8 @@ class FtpDllActiveFtpSession private constructor(
                 }
                 output.toByteArray()
             } finally {
+                // Bounded RETR intentionally stops before EOF. Do not reuse the
+                // control channel because 426/226 may still be queued.
                 channel.closeImmediately()
             }
         }

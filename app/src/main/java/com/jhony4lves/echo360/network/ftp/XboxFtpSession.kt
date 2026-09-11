@@ -32,7 +32,33 @@ interface XboxFtpSession {
     suspend fun readPrefixAndClose(
         canonicalPath: String,
         byteCount: Int,
-    ): ByteArray = throw UnsupportedOperationException("Leitura parcial não suportada por esta sessão FTP.")
+    ): ByteArray = readRangeAndClose(canonicalPath, 0L, byteCount)
+
+    /**
+     * Reads at most [byteCount] bytes starting at [offset] using REST + RETR.
+     *
+     * This is intentionally a consuming operation: implementations close the
+     * control channel immediately after the requested bytes are collected. FTP
+     * has no standard end-offset command, so abandoning the short-lived RETR is
+     * safer than trying to reuse a control channel that may still receive a 426
+     * or 226 after the data socket is closed early.
+     *
+     * EchoFix uses this primitive for sparse GOD/XDVDFS probing. It can inspect
+     * just the volume descriptor and directory sectors needed to decide whether
+     * FFED2000/FFFFFFFF exists without reconstructing the whole multi-GB GOD.
+     */
+    suspend fun readRangeAndClose(
+        canonicalPath: String,
+        offset: Long,
+        byteCount: Int,
+    ): ByteArray {
+        require(offset >= 0L) { "Offset FTP deve ser >= 0." }
+        require(byteCount > 0) { "byteCount deve ser maior que zero." }
+        if (offset == 0L) {
+            throw UnsupportedOperationException("Leitura parcial não suportada por esta sessão FTP.")
+        }
+        throw UnsupportedOperationException("REST parcial não suportado por esta sessão FTP.")
+    }
 
     /**
      * Renames or moves a file entirely on the Xbox FTP server using RNFR/RNTO.

@@ -46,6 +46,33 @@ object GodContainerFormat {
         return payloadBytes(rawOffset)
     }
 
+    /**
+     * Maps a payload byte offset (after stripping GOD prefix/hash metadata) back
+     * to the raw byte offset inside one DataNNNN file.
+     *
+     * This is the key primitive for sparse XDVDFS reads: EchoFix can ask FTP for
+     * only the exact raw spans that contain a volume descriptor or directory
+     * sector instead of reconstructing the whole GOD first.
+     */
+    fun rawOffsetForPayloadOffset(payloadOffset: Long): Long {
+        require(payloadOffset >= 0L) { "Offset de payload do GOD deve ser >= 0." }
+        val fullDataSpans = payloadOffset / DATA_SPAN_BYTES
+        val insideDataSpan = payloadOffset % DATA_SPAN_BYTES
+        return PART_PREFIX_BYTES +
+            fullDataSpans * DATA_CYCLE_BYTES +
+            insideDataSpan
+    }
+
+    /**
+     * Maximum number of payload bytes that can be read contiguously from the raw
+     * DataNNNN before a 0x1000 hash span has to be skipped.
+     */
+    fun contiguousPayloadBytesBeforeHash(payloadOffset: Long): Long {
+        require(payloadOffset >= 0L) { "Offset de payload do GOD deve ser >= 0." }
+        val insideDataSpan = payloadOffset % DATA_SPAN_BYTES
+        return DATA_SPAN_BYTES - insideDataSpan
+    }
+
     fun estimatedIsoBytes(parts: List<GodDataPart>, hasXsfHeader: Boolean): Long {
         val payload = parts.sumOf(GodDataPart::payloadSize)
         return payload + if (hasXsfHeader) 0L else SYNTHETIC_XSF_HEADER_BYTES.toLong()

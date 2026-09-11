@@ -28,10 +28,10 @@ class NotInstallerGodException(message: String) : IllegalArgumentException(messa
 /**
  * Long-running GOD analysis path used by the foreground service.
  *
- * It intentionally shares the same output models as [GodInstallerRepository]
- * so validation/install remain unchanged, but reconstruction is delegated to
- * [GodResumableIsoBuilder]. The temporary image has a deterministic path, which
- * lets a new process discover and continue a previous checkpoint.
+ * Before reconstructing multi-gigabyte data, EchoFix performs a sparse XDVDFS
+ * probe using FTP REST range reads. Negative candidates normally finish after a
+ * few directory sectors and STFS prefixes; positive candidates then continue
+ * through the durable GOD -> XISO checkpoint pipeline.
  */
 class ResumableGodAnalysisRepository(
     context: Context,
@@ -101,6 +101,52 @@ class ResumableGodAnalysisRepository(
         val tempIso = tempIsoFile(exactCandidate)
 
         try {
+            onProgress(
+                GodRepairProgress(
+                    stage = GodRepairStage.InspectingXdvdfs,
+                    message = "Quick Probe: procurando FFED2000/FFFFFFFF sem reconstruir o GOD inteiro...",
+                ),
+            )
+
+            val sparseVerdict = try {
+                probeInstallerSparse(
+                    profile = profile,
+                    candidate = exactCandidate,
+                    parts = currentParts,
+                    hasXsfHeader = hasXsfHeader,
+                    sectorCorrection = sectorCorrection,
+                    requestedRoute = requestedRoute,
+                    preferredRoute = preferred,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                // Sparse probing is an optimisation, never the only path to a
+                // repair. A server that rejects bounded REST still gets the old
+                // full reconstruction path rather than a false negative.
+                onProgress(
+                    GodRepairProgress(
+                        stage = GodRepairStage.InspectingXdvdfs,
+                        message = "Quick Probe indisponível (${error.message ?: error.javaClass.simpleName}). Continuando pelo modo completo com checkpoint...",
+                    ),
+                )
+                null
+            }
+
+            if (sparseVerdict != null) {
+                if (!sparseVerdict.installer) {
+                    throw NotInstallerGodException(
+                        "Quick Probe leu ${formatBytes(sparseVerdict.remoteBytesRead)} e confirmou: ${sparseVerdict.reason}",
+                    )
+                }
+                onProgress(
+                    GodRepairProgress(
+                        stage = GodRepairStage.InspectingXdvdfs,
+                        message = "Quick Probe positivo após ${formatBytes(sparseVerdict.remoteBytesRead)}. Instalador compatível encontrado; retomando/reconstruindo só agora...",
+                    ),
+                )
+            }
+
             builder.reconstruct(
                 profile = profile,
                 parts = currentParts,
@@ -115,7 +161,7 @@ class ResumableGodAnalysisRepository(
             onProgress(
                 GodRepairProgress(
                     stage = GodRepairStage.InspectingXdvdfs,
-                    message = "XISO pronta. Procurando FFED2000/FFFFFFFF...",
+                    message = "XISO pronta. Confirmando FFED2000/FFFFFFFF e montando o plano...",
                     completedBytes = exactIsoBytes,
                     totalBytes = exactIsoBytes,
                 ),
@@ -207,8 +253,9 @@ class ResumableGodAnalysisRepository(
             // Preserve XISO + checkpoint. A later foreground-service run resumes.
             throw cancelled
         } catch (notInstaller: NotInstallerGodException) {
-            // Full image was valid but this recipe does not apply. Keeping many
-            // GB of persistent workspace offers no value, so clean it.
+            // A negative sparse/full verdict makes the partial XISO useless for
+            // this recipe. Removing it frees the phone while the verdict store
+            // prevents the same unchanged GOD from being offered again.
             builder.discard(tempIso)
             throw notInstaller
         } catch (error: Throwable) {
@@ -230,6 +277,77 @@ class ResumableGodAnalysisRepository(
         )
     }
 
+    private suspend fun probeInstallerSparse(
+        profile: XboxProfile,
+        candidate: GodPackageCandidate,
+        parts: List<GodDataPart>,
+        hasXsfHeader: Boolean,
+        sectorCorrection: Int,
+        requestedRoute: FtpRoute,
+        preferredRoute: FtpRoute,
+    ): SparseInstallerVerdict {
+        val reader = GodSparseXdvdfsReader(
+            parts = parts,
+            hasXsfHeader = hasXsfHeader,
+            sectorCorrection = sectorCorrection,
+        ) { canonicalPath, rawOffset, byteCount ->
+            readRangeWithFallback(
+                profile = profile,
+                canonicalPath = canonicalPath,
+                offset = rawOffset,
+                byteCount = byteCount,
+                requestedRoute = requestedRoute,
+                preferredRoute = preferredRoute,
+            )
+        }
+
+        val directory = reader.findDirectoryPath(INSTALLER_PATH_SEGMENTS)
+            ?: return SparseInstallerVerdict(
+                installer = false,
+                remoteBytesRead = reader.remoteBytesRead,
+                reason = "não existe $INSTALLER_PATH dentro do GOD.",
+            )
+
+        val entries = reader.listDirectory(directory)
+            .filter { !it.isDirectory }
+            .sortedBy { it.name.lowercase() }
+        if (entries.isEmpty()) {
+            return SparseInstallerVerdict(
+                installer = false,
+                remoteBytesRead = reader.remoteBytesRead,
+                reason = "$INSTALLER_PATH existe, mas está vazio.",
+            )
+        }
+
+        for (entry in entries) {
+            if (entry.size < StfsHeaderReader.REQUIRED_BYTES) continue
+
+            // A network/range-read failure must escape and trigger full-mode
+            // fallback. Only malformed STFS metadata is treated as a bad entry.
+            val prefix = reader.readEntryPrefix(entry, StfsHeaderReader.REQUIRED_BYTES)
+            val metadata = runCatching { StfsHeaderReader.inspect(prefix) }.getOrNull() ?: continue
+            val source = RepairSource(
+                relativePath = "$INSTALLER_PATH/${entry.name}",
+                fileName = entry.name,
+                size = entry.size,
+                kind = RepairSourceKind.GodEmbedded,
+            )
+            if (runCatching { StockDlcInstallerRule.plan(source, metadata) }.isSuccess) {
+                return SparseInstallerVerdict(
+                    installer = true,
+                    remoteBytesRead = reader.remoteBytesRead,
+                    reason = "pacote STFS instalável encontrado.",
+                )
+            }
+        }
+
+        return SparseInstallerVerdict(
+            installer = false,
+            remoteBytesRead = reader.remoteBytesRead,
+            reason = "$INSTALLER_PATH foi encontrado, mas não contém pacote DLC STFS compatível.",
+        )
+    }
+
     private suspend fun refreshAndValidateParts(
         profile: XboxProfile,
         candidate: GodPackageCandidate,
@@ -240,7 +358,9 @@ class ResumableGodAnalysisRepository(
         for (route in routeOrder(requestedRoute, preferredRoute)) {
             val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
             if (routedAttempt.isFailure) {
-                lastFailure = routedAttempt.exceptionOrNull()
+                val error = routedAttempt.exceptionOrNull()
+                if (error is CancellationException) throw error
+                lastFailure = error
                 continue
             }
             val session = routedAttempt.getOrThrow().session
@@ -257,6 +377,8 @@ class ResumableGodAnalysisRepository(
                     "Os DataNNNN mudaram desde o scan. Escaneie novamente antes de analisar."
                 }
                 return freshParts
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 lastFailure = error
             } finally {
@@ -292,12 +414,16 @@ class ResumableGodAnalysisRepository(
         for (route in routeOrder(requestedRoute, preferredRoute)) {
             val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
             if (routedAttempt.isFailure) {
-                lastFailure = routedAttempt.exceptionOrNull()
+                val error = routedAttempt.exceptionOrNull()
+                if (error is CancellationException) throw error
+                lastFailure = error
                 continue
             }
             val session = routedAttempt.getOrThrow().session
             try {
                 return session.readPrefixAndClose(canonicalPath, byteCount)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 lastFailure = error
             } finally {
@@ -306,6 +432,40 @@ class ResumableGodAnalysisRepository(
         }
         throw IllegalStateException(
             "Nenhum FTP conseguiu ler $byteCount bytes de $canonicalPath.",
+            lastFailure,
+        )
+    }
+
+    private suspend fun readRangeWithFallback(
+        profile: XboxProfile,
+        canonicalPath: String,
+        offset: Long,
+        byteCount: Int,
+        requestedRoute: FtpRoute,
+        preferredRoute: FtpRoute,
+    ): ByteArray {
+        var lastFailure: Throwable? = null
+        for (route in routeOrder(requestedRoute, preferredRoute)) {
+            val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
+            if (routedAttempt.isFailure) {
+                val error = routedAttempt.exceptionOrNull()
+                if (error is CancellationException) throw error
+                lastFailure = error
+                continue
+            }
+            val session = routedAttempt.getOrThrow().session
+            try {
+                return session.readRangeAndClose(canonicalPath, offset, byteCount)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                lastFailure = error
+            } finally {
+                runCatching { session.close() }
+            }
+        }
+        throw IllegalStateException(
+            "Nenhum FTP conseguiu ler $byteCount bytes em offset $offset de $canonicalPath.",
             lastFailure,
         )
     }
@@ -371,6 +531,12 @@ class ResumableGodAnalysisRepository(
         bytes >= 1024L -> String.format("%.1f KB", bytes / 1024.0)
         else -> "$bytes B"
     }
+
+    private data class SparseInstallerVerdict(
+        val installer: Boolean,
+        val remoteBytesRead: Long,
+        val reason: String,
+    )
 
     companion object {
         private const val CONTENT_TYPE_GOD = 0x00007000L
