@@ -1,7 +1,6 @@
 package com.jhony4lves.echo360.data.fix
 
 import android.content.Context
-import android.os.StatFs
 import com.jhony4lves.echo360.data.security.SecureXboxConfigStore
 import com.jhony4lves.echo360.domain.fix.GodDataPart
 import com.jhony4lves.echo360.domain.fix.GodEmbeddedPayload
@@ -26,12 +25,16 @@ import java.io.File
 class NotInstallerGodException(message: String) : IllegalArgumentException(message)
 
 /**
- * Long-running GOD analysis path used by the foreground service.
+ * Rule 002 analyser.
  *
- * Before reconstructing multi-gigabyte data, EchoFix performs a sparse XDVDFS
- * probe using FTP REST range reads. Negative candidates normally finish after a
- * few directory sectors and STFS prefixes; positive candidates then continue
- * through the durable GOD -> XISO checkpoint pipeline.
+ * This version never reconstructs a multi-gigabyte XISO merely to decide what
+ * is inside a GOD. It uses sparse FTP REST reads to walk the XDVDFS directory
+ * tree, reads only STFS prefixes under FFED2000/FFFFFFFF and returns a direct
+ * source plan. The actual package bytes are materialized only after the user
+ * validates destinations and explicitly starts installation.
+ *
+ * Old Build 313/321 partial-XISO checkpoints remain discoverable so they can be
+ * deleted after a conclusive sparse verdict instead of wasting phone storage.
  */
 class ResumableGodAnalysisRepository(
     context: Context,
@@ -39,14 +42,14 @@ class ResumableGodAnalysisRepository(
 ) {
     private val appContext = context.applicationContext
     private val configStore = SecureXboxConfigStore(appContext)
-    private val builder = GodResumableIsoBuilder(sessionFactory)
+    private val legacyBuilder = GodResumableIsoBuilder(sessionFactory)
 
     suspend fun analyze(
         candidate: GodPackageCandidate,
         requestedRoute: FtpRoute = FtpRoute.Auto,
         onProgress: (GodRepairProgress) -> Unit = {},
     ): GodInstallerPlan = withContext(Dispatchers.IO) {
-        cleanupStaleTemps()
+        cleanupStaleLegacyTemps()
         val profile = requireProfile()
         val preferred = sessionFactory.connect(profile, requestedRoute).let { routed ->
             try {
@@ -59,7 +62,7 @@ class ResumableGodAnalysisRepository(
         onProgress(
             GodRepairProgress(
                 stage = GodRepairStage.ReadingContainer,
-                message = "Revalidando GOD ${candidate.packageName} antes de continuar...",
+                message = "Revalidando GOD ${candidate.packageName} antes do Quick Probe...",
             ),
         )
 
@@ -98,176 +101,100 @@ class ResumableGodAnalysisRepository(
             dataParts = currentParts,
             estimatedIsoBytes = exactIsoBytes,
         )
-        val tempIso = tempIsoFile(exactCandidate)
+        val legacyTempIso = tempIsoFile(exactCandidate)
 
         try {
             onProgress(
                 GodRepairProgress(
                     stage = GodRepairStage.InspectingXdvdfs,
-                    message = "Quick Probe: procurando FFED2000/FFFFFFFF sem reconstruir o GOD inteiro...",
+                    message = "Quick Probe: lendo só diretórios XDVDFS e headers STFS necessários...",
                 ),
             )
 
-            val sparseVerdict = try {
-                probeInstallerSparse(
-                    profile = profile,
-                    candidate = exactCandidate,
-                    parts = currentParts,
-                    hasXsfHeader = hasXsfHeader,
-                    sectorCorrection = sectorCorrection,
-                    requestedRoute = requestedRoute,
-                    preferredRoute = preferred,
-                )
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                // Sparse probing is an optimisation, never the only path to a
-                // repair. A server that rejects bounded REST still gets the old
-                // full reconstruction path rather than a false negative.
-                onProgress(
-                    GodRepairProgress(
-                        stage = GodRepairStage.InspectingXdvdfs,
-                        message = "Quick Probe indisponível (${error.message ?: error.javaClass.simpleName}). Continuando pelo modo completo com checkpoint...",
-                    ),
-                )
-                null
-            }
-
-            if (sparseVerdict != null) {
-                if (!sparseVerdict.installer) {
-                    throw NotInstallerGodException(
-                        "Quick Probe leu ${formatBytes(sparseVerdict.remoteBytesRead)} e confirmou: ${sparseVerdict.reason}",
-                    )
-                }
-                onProgress(
-                    GodRepairProgress(
-                        stage = GodRepairStage.InspectingXdvdfs,
-                        message = "Quick Probe positivo após ${formatBytes(sparseVerdict.remoteBytesRead)}. Instalador compatível encontrado; retomando/reconstruindo só agora...",
-                    ),
-                )
-            }
-
-            builder.reconstruct(
+            val sparse = probeInstallerSparse(
                 profile = profile,
                 parts = currentParts,
-                output = tempIso,
                 hasXsfHeader = hasXsfHeader,
-                expectedIsoBytes = exactIsoBytes,
-                routeOrder = routeOrder(requestedRoute, preferred),
-                ensureAdditionalSpace = { additional -> ensureAdditionalTempSpace(tempIso.parentFile!!, additional) },
-                onProgress = onProgress,
+                sectorCorrection = sectorCorrection,
+                requestedRoute = requestedRoute,
+                preferredRoute = preferred,
             )
+
+            if (sparse.payloads.isEmpty()) {
+                legacyBuilder.discard(legacyTempIso)
+                throw NotInstallerGodException(
+                    "Quick Probe leu ${formatBytes(sparse.remoteBytesRead)} e confirmou: ${sparse.reason}",
+                )
+            }
+
+            val oldCheckpointDeleted = legacyBuilder.discard(legacyTempIso)
+            val issues = sparse.issues.toMutableList().apply {
+                add(
+                    RepairIssue(
+                        severity = RepairSeverity.Info,
+                        message = buildString {
+                            append("Quick Probe concluiu com ")
+                            append(formatBytes(sparse.remoteBytesRead))
+                            append(" lidos. A XISO completa não foi reconstruída; ")
+                            append("o EchoFix vai extrair somente o(s) pacote(s) necessário(s) se você mandar instalar.")
+                        },
+                        sourcePath = candidate.headerPath,
+                    ),
+                )
+                if (!oldCheckpointDeleted) {
+                    add(
+                        RepairIssue(
+                            severity = RepairSeverity.Warning,
+                            message = "Um cache XISO antigo não pôde ser removido automaticamente.",
+                            sourcePath = legacyTempIso.absolutePath,
+                        ),
+                    )
+                }
+            }
 
             onProgress(
                 GodRepairProgress(
                     stage = GodRepairStage.InspectingXdvdfs,
-                    message = "XISO pronta. Confirmando FFED2000/FFFFFFFF e montando o plano...",
-                    completedBytes = exactIsoBytes,
-                    totalBytes = exactIsoBytes,
+                    message = "Quick Probe positivo: ${sparse.payloads.size} pacote(s) instalável(is) encontrado(s) após ${formatBytes(sparse.remoteBytesRead)}.",
+                    completedBytes = sparse.remoteBytesRead,
+                    totalBytes = sparse.remoteBytesRead.coerceAtLeast(1L),
                 ),
             )
 
-            val issues = mutableListOf<RepairIssue>()
-            val payloads = mutableListOf<GodEmbeddedPayload>()
-            XdvdfsImageReader(tempIso, sectorCorrection).use { image ->
-                val payloadDirectory = image.findDirectoryPath(INSTALLER_PATH_SEGMENTS)
-                    ?: throw NotInstallerGodException(
-                        "Esse GOD não contém content/0000000000000000/FFED2000/FFFFFFFF. Ele parece ser um disco/jogo normal, não um instalador desse tipo.",
-                    )
-
-                val entries = image.listDirectory(payloadDirectory)
-                    .filter { !it.isDirectory }
-                    .sortedBy { it.name.lowercase() }
-                if (entries.isEmpty()) {
-                    throw NotInstallerGodException("FFFFFFFF existe dentro do GOD, mas está vazia.")
-                }
-
-                for (entry in entries) {
-                    if (entry.size < StfsHeaderReader.REQUIRED_BYTES) {
-                        issues += RepairIssue(
-                            severity = RepairSeverity.Warning,
-                            message = "${entry.name} é pequeno demais para STFS e foi ignorado.",
-                            sourcePath = "$INSTALLER_PATH/${entry.name}",
-                        )
-                        continue
-                    }
-
-                    val metadataAttempt = runCatching {
-                        StfsHeaderReader.inspect(
-                            image.readEntryPrefix(entry, StfsHeaderReader.REQUIRED_BYTES),
-                        )
-                    }
-                    if (metadataAttempt.isFailure) {
-                        issues += RepairIssue(
-                            severity = RepairSeverity.Warning,
-                            message = "${entry.name} ignorado: ${metadataAttempt.exceptionOrNull()?.message ?: "STFS inválido"}",
-                            sourcePath = "$INSTALLER_PATH/${entry.name}",
-                        )
-                        continue
-                    }
-
-                    val source = RepairSource(
-                        relativePath = "$INSTALLER_PATH/${entry.name}",
-                        fileName = entry.name,
-                        size = entry.size,
-                        kind = RepairSourceKind.GodEmbedded,
-                    )
-                    val actionAttempt = runCatching {
-                        StockDlcInstallerRule.plan(source, metadataAttempt.getOrThrow())
-                    }
-                    if (actionAttempt.isFailure) {
-                        issues += RepairIssue(
-                            severity = RepairSeverity.Warning,
-                            message = actionAttempt.exceptionOrNull()?.message
-                                ?: "Pacote interno não é DLC compatível.",
-                            sourcePath = source.relativePath,
-                        )
-                        continue
-                    }
-
-                    payloads += GodEmbeddedPayload(
-                        internalPath = source.relativePath,
-                        isoOffset = entry.byteOffset,
-                        action = actionAttempt.getOrThrow(),
-                    )
-                }
-            }
-
-            if (payloads.isEmpty()) {
-                throw NotInstallerGodException(
-                    "O instalador foi encontrado dentro do GOD, mas nenhum pacote DLC STFS válido pôde ser roteado.",
-                )
-            }
-
             GodInstallerPlan(
                 candidate = exactCandidate,
-                tempIsoPath = tempIso.absolutePath,
-                tempIsoBytes = tempIso.length(),
+                tempIsoPath = DIRECT_GOD_SOURCE_MARKER,
+                tempIsoBytes = 0L,
                 hasXsfHeader = hasXsfHeader,
                 sectorCorrection = sectorCorrection,
                 detectedPayloadPath = INSTALLER_PATH,
-                payloads = payloads,
+                payloads = sparse.payloads,
                 issues = issues,
             )
         } catch (cancelled: CancellationException) {
-            // Preserve XISO + checkpoint. A later foreground-service run resumes.
+            // A Quick Probe is tiny, but cancellation must remain cancellation.
+            // Old checkpoints are intentionally left untouched in this case.
             throw cancelled
         } catch (notInstaller: NotInstallerGodException) {
-            // A negative sparse/full verdict makes the partial XISO useless for
-            // this recipe. Removing it frees the phone while the verdict store
-            // prevents the same unchanged GOD from being offered again.
-            builder.discard(tempIso)
+            legacyBuilder.discard(legacyTempIso)
             throw notInstaller
         } catch (error: Throwable) {
-            // Network/process/storage failures are resumable. Keep the durable
-            // checkpoint instead of deleting hours of completed work.
-            throw error
+            // Do not silently fall back to a multi-GB reconstruction. The whole
+            // point of this generation is that analysis stays sparse/predictable.
+            throw IllegalStateException(
+                "Quick Probe não conseguiu concluir sem reconstruir a XISO. Nenhum download de vários GB foi iniciado. ${error.message ?: error.javaClass.simpleName}",
+                error,
+            )
         }
     }
 
-    fun discard(candidate: GodPackageCandidate): Boolean = builder.discard(tempIsoFile(candidate))
+    fun discard(candidate: GodPackageCandidate): Boolean = legacyBuilder.discard(tempIsoFile(candidate))
 
-    fun discard(plan: GodInstallerPlan): Boolean = builder.discard(File(plan.tempIsoPath))
+    fun discard(plan: GodInstallerPlan): Boolean = if (plan.tempIsoPath == DIRECT_GOD_SOURCE_MARKER) {
+        discard(plan.candidate)
+    } else {
+        legacyBuilder.discard(File(plan.tempIsoPath))
+    }
 
     fun tempIsoFile(candidate: GodPackageCandidate): File {
         val key = Integer.toHexString(candidate.headerPath.lowercase().hashCode())
@@ -279,13 +206,12 @@ class ResumableGodAnalysisRepository(
 
     private suspend fun probeInstallerSparse(
         profile: XboxProfile,
-        candidate: GodPackageCandidate,
         parts: List<GodDataPart>,
         hasXsfHeader: Boolean,
         sectorCorrection: Int,
         requestedRoute: FtpRoute,
         preferredRoute: FtpRoute,
-    ): SparseInstallerVerdict {
+    ): SparseInstallerAnalysis {
         val reader = GodSparseXdvdfsReader(
             parts = parts,
             hasXsfHeader = hasXsfHeader,
@@ -302,8 +228,9 @@ class ResumableGodAnalysisRepository(
         }
 
         val directory = reader.findDirectoryPath(INSTALLER_PATH_SEGMENTS)
-            ?: return SparseInstallerVerdict(
-                installer = false,
+            ?: return SparseInstallerAnalysis(
+                payloads = emptyList(),
+                issues = emptyList(),
                 remoteBytesRead = reader.remoteBytesRead,
                 reason = "não existe $INSTALLER_PATH dentro do GOD.",
             )
@@ -312,39 +239,76 @@ class ResumableGodAnalysisRepository(
             .filter { !it.isDirectory }
             .sortedBy { it.name.lowercase() }
         if (entries.isEmpty()) {
-            return SparseInstallerVerdict(
-                installer = false,
+            return SparseInstallerAnalysis(
+                payloads = emptyList(),
+                issues = emptyList(),
                 remoteBytesRead = reader.remoteBytesRead,
                 reason = "$INSTALLER_PATH existe, mas está vazio.",
             )
         }
 
-        for (entry in entries) {
-            if (entry.size < StfsHeaderReader.REQUIRED_BYTES) continue
+        val payloads = mutableListOf<GodEmbeddedPayload>()
+        val issues = mutableListOf<RepairIssue>()
 
-            // A network/range-read failure must escape and trigger full-mode
-            // fallback. Only malformed STFS metadata is treated as a bad entry.
+        for (entry in entries) {
+            val internalPath = "$INSTALLER_PATH/${entry.name}"
+            if (entry.size < StfsHeaderReader.REQUIRED_BYTES) {
+                issues += RepairIssue(
+                    severity = RepairSeverity.Warning,
+                    message = "${entry.name} é pequeno demais para STFS e foi ignorado.",
+                    sourcePath = internalPath,
+                )
+                continue
+            }
+
+            // Network/range errors deliberately escape. Treating them as an
+            // invalid package could create a false negative.
             val prefix = reader.readEntryPrefix(entry, StfsHeaderReader.REQUIRED_BYTES)
-            val metadata = runCatching { StfsHeaderReader.inspect(prefix) }.getOrNull() ?: continue
+            val metadataAttempt = runCatching { StfsHeaderReader.inspect(prefix) }
+            if (metadataAttempt.isFailure) {
+                issues += RepairIssue(
+                    severity = RepairSeverity.Warning,
+                    message = "${entry.name} ignorado: ${metadataAttempt.exceptionOrNull()?.message ?: "STFS inválido"}",
+                    sourcePath = internalPath,
+                )
+                continue
+            }
+
             val source = RepairSource(
-                relativePath = "$INSTALLER_PATH/${entry.name}",
+                relativePath = internalPath,
                 fileName = entry.name,
                 size = entry.size,
                 kind = RepairSourceKind.GodEmbedded,
             )
-            if (runCatching { StockDlcInstallerRule.plan(source, metadata) }.isSuccess) {
-                return SparseInstallerVerdict(
-                    installer = true,
-                    remoteBytesRead = reader.remoteBytesRead,
-                    reason = "pacote STFS instalável encontrado.",
-                )
+            val actionAttempt = runCatching {
+                StockDlcInstallerRule.plan(source, metadataAttempt.getOrThrow())
             }
+            if (actionAttempt.isFailure) {
+                issues += RepairIssue(
+                    severity = RepairSeverity.Warning,
+                    message = actionAttempt.exceptionOrNull()?.message
+                        ?: "Pacote interno não é DLC compatível.",
+                    sourcePath = internalPath,
+                )
+                continue
+            }
+
+            payloads += GodEmbeddedPayload(
+                internalPath = internalPath,
+                isoOffset = entry.byteOffset,
+                action = actionAttempt.getOrThrow(),
+            )
         }
 
-        return SparseInstallerVerdict(
-            installer = false,
+        return SparseInstallerAnalysis(
+            payloads = payloads,
+            issues = issues,
             remoteBytesRead = reader.remoteBytesRead,
-            reason = "$INSTALLER_PATH foi encontrado, mas não contém pacote DLC STFS compatível.",
+            reason = if (payloads.isEmpty()) {
+                "$INSTALLER_PATH foi encontrado, mas não contém pacote DLC STFS compatível."
+            } else {
+                "${payloads.size} pacote(s) STFS instalável(is) encontrado(s)."
+            },
         )
     }
 
@@ -470,29 +434,6 @@ class ResumableGodAnalysisRepository(
         )
     }
 
-    private fun ensureAdditionalTempSpace(directory: File, additionalBytes: Long) {
-        if (additionalBytes <= 0L) return
-        val available = StatFs(directory.absolutePath).availableBytes
-        val requiredWithReserve = additionalBytes + TEMP_FREE_RESERVE_BYTES
-        require(available >= requiredWithReserve) {
-            "Espaço insuficiente para continuar o GOD. Livre: ${formatBytes(available)}; ainda necessário: aproximadamente ${formatBytes(requiredWithReserve)}. O progresso já concluído foi preservado."
-        }
-    }
-
-    private fun cleanupStaleTemps() {
-        val cutoff = System.currentTimeMillis() - RESUME_MAX_AGE_MS
-        tempDirectory().listFiles()?.forEach { file ->
-            if (file.lastModified() >= cutoff) return@forEach
-            if (
-                file.name.endsWith(".xiso.partial") ||
-                file.name.endsWith(".xiso.partial.resume") ||
-                file.name.endsWith(".xiso.partial.resume.tmp")
-            ) {
-                runCatching { file.delete() }
-            }
-        }
-    }
-
     private fun routeOrder(requestedRoute: FtpRoute, preferredRoute: FtpRoute): List<FtpRoute> {
         if (requestedRoute != FtpRoute.Auto) return listOf(requestedRoute)
         val preferred = when (preferredRoute) {
@@ -510,10 +451,21 @@ class ResumableGodAnalysisRepository(
     private fun requireProfile(): XboxProfile = configStore.load()
         ?: error("Configure o Xbox na aba Xbox antes de usar o EchoFix.")
 
+    private fun cleanupStaleLegacyTemps() {
+        val cutoff = System.currentTimeMillis() - RESUME_MAX_AGE_MS
+        tempDirectory().listFiles()?.forEach { file ->
+            if (file.lastModified() >= cutoff) return@forEach
+            if (
+                file.name.endsWith(".xiso.partial") ||
+                file.name.endsWith(".xiso.partial.resume") ||
+                file.name.endsWith(".xiso.partial.resume.tmp")
+            ) {
+                runCatching { file.delete() }
+            }
+        }
+    }
+
     private fun tempDirectory(): File {
-        // This is intentionally app-specific persistent storage, not a cache
-        // directory. Android may evict caches under pressure, which would break
-        // the promise that a 50% GOD can continue from the saved checkpoint.
         val root = appContext.getExternalFilesDir(null) ?: appContext.filesDir
         return File(root, TEMP_DIRECTORY_NAME).apply {
             require(mkdirs() || isDirectory) {
@@ -532,8 +484,9 @@ class ResumableGodAnalysisRepository(
         else -> "$bytes B"
     }
 
-    private data class SparseInstallerVerdict(
-        val installer: Boolean,
+    private data class SparseInstallerAnalysis(
+        val payloads: List<GodEmbeddedPayload>,
+        val issues: List<RepairIssue>,
         val remoteBytesRead: Long,
         val reason: String,
     )
@@ -541,7 +494,6 @@ class ResumableGodAnalysisRepository(
     companion object {
         private const val CONTENT_TYPE_GOD = 0x00007000L
         private const val TEMP_DIRECTORY_NAME = "echofix-god-resume"
-        private const val TEMP_FREE_RESERVE_BYTES = 256L * 1024L * 1024L
         private const val RESUME_MAX_AGE_MS = 7L * 24L * 60L * 60L * 1000L
         private val DATA_PART_REGEX = Regex("^Data\\d{4}$", RegexOption.IGNORE_CASE)
         private val INSTALLER_PATH_SEGMENTS = listOf(
