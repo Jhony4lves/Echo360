@@ -18,20 +18,21 @@ import com.jhony4lves.echo360.domain.fix.GodRepairProgress
 import com.jhony4lves.echo360.domain.fix.GodRepairStage
 import com.jhony4lves.echo360.domain.fix.RepairIssue
 import com.jhony4lves.echo360.domain.fix.RepairSeverity
-import com.jhony4lves.echo360.domain.fix.RepairSource
-import com.jhony4lves.echo360.domain.fix.RepairSourceKind
-import com.jhony4lves.echo360.domain.fix.StockDlcInstallerRule
-import com.jhony4lves.echo360.domain.xbox.XboxPath
+import com.jhony4lves.echo360.domain.fix.XboxPath
 import com.jhony4lves.echo360.domain.xbox.XboxProfile
 import com.jhony4lves.echo360.network.ftp.FtpRoute
 import com.jhony4lves.echo360.network.ftp.RemoteEntry
 import com.jhony4lves.echo360.network.ftp.XboxFtpSession
 import com.jhony4lves.echo360.network.ftp.XboxFtpSessionFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.io.RandomAccessFile
 import kotlin.math.min
 
@@ -79,18 +80,15 @@ class GodInstallerRepository(
                     continue
                 }
                 val listing = listingAttempt.getOrThrow()
-
                 val dataDirectories = listing
                     .filter(RemoteEntry::isDirectory)
                     .associateBy { it.name.lowercase() }
-
                 val packageFiles = listing
                     .filter { !it.isDirectory }
                     .sortedBy { it.name.lowercase() }
 
                 for (packageFile in packageFiles) {
                     val dataDirectory = dataDirectories["${packageFile.name}.data".lowercase()] ?: continue
-
                     val partListingAttempt = runCatching {
                         routed.session.list(dataDirectory.canonicalPath)
                     }
@@ -209,7 +207,6 @@ class GodInstallerRepository(
                 sourcePath = root,
             )
         }
-
         if (candidates.isEmpty()) {
             issues += RepairIssue(
                 severity = RepairSeverity.Info,
@@ -237,171 +234,8 @@ class GodInstallerRepository(
         candidate: GodPackageCandidate,
         requestedRoute: FtpRoute = FtpRoute.Auto,
         onProgress: (GodRepairProgress) -> Unit = {},
-    ): GodInstallerPlan = withContext(Dispatchers.IO) {
-        val profile = requireProfile()
-        val preferred = sessionFactory.connect(profile, requestedRoute).let { routed ->
-            try {
-                routed.route
-            } finally {
-                runCatching { routed.session.close() }
-            }
-        }
-
-        onProgress(
-            GodRepairProgress(
-                stage = GodRepairStage.ReadingContainer,
-                message = "Validando estrutura do GOD ${candidate.packageName}...",
-            ),
-        )
-
-        val currentParts = refreshAndValidateParts(profile, candidate, requestedRoute, preferred)
-        val extendedHeader = readPrefixWithFallback(
-            profile = profile,
-            canonicalPath = candidate.headerPath,
-            byteCount = GodContainerFormat.EXTENDED_CONTAINER_HEADER_BYTES,
-            requestedRoute = requestedRoute,
-            preferredRoute = preferred,
-        ).first
-        val freshMetadata = StfsHeaderReader.inspect(extendedHeader)
-        require(freshMetadata.contentType == CONTENT_TYPE_GOD) {
-            "O arquivo deixou de ser um container GOD (Content Type ${freshMetadata.contentTypeHex})."
-        }
-
-        val data0000 = currentParts.firstOrNull { it.name.equals("Data0000", ignoreCase = true) }
-            ?: error("GOD sem Data0000.")
-        val data0000Prefix = readPrefixWithFallback(
-            profile = profile,
-            canonicalPath = data0000.canonicalPath,
-            byteCount = GodContainerFormat.XSF_PROBE_BYTES,
-            requestedRoute = requestedRoute,
-            preferredRoute = preferred,
-        ).first
-        val hasXsfHeader = GodContainerFormat.hasXsfHeader(data0000Prefix)
-        val sectorCorrection = GodContainerFormat.sectorCorrection(extendedHeader, hasXsfHeader)
-        val exactIsoBytes = GodContainerFormat.estimatedIsoBytes(currentParts, hasXsfHeader)
-
-        val tempDir = tempDirectory()
-        ensureTempSpace(tempDir, exactIsoBytes)
-        val tempIso = File(
-            tempDir,
-            "${freshMetadata.titleId}_${safeTempName(candidate.packageName)}_${System.currentTimeMillis()}.xiso.tmp",
-        )
-
-        try {
-            reconstructIso(
-                profile = profile,
-                parts = currentParts,
-                output = tempIso,
-                hasXsfHeader = hasXsfHeader,
-                requestedRoute = requestedRoute,
-                preferredRoute = preferred,
-                onProgress = onProgress,
-            )
-            require(tempIso.length() == exactIsoBytes) {
-                "Imagem reconstruída ficou com ${tempIso.length()} bytes; esperado $exactIsoBytes."
-            }
-
-            onProgress(
-                GodRepairProgress(
-                    stage = GodRepairStage.InspectingXdvdfs,
-                    message = "Abrindo XDVDFS e procurando FFED2000/FFFFFFFF...",
-                    completedBytes = exactIsoBytes,
-                    totalBytes = exactIsoBytes,
-                ),
-            )
-
-            val issues = mutableListOf<RepairIssue>()
-            val payloads = mutableListOf<GodEmbeddedPayload>()
-            XdvdfsImageReader(tempIso, sectorCorrection).use { image ->
-                val payloadDirectory = image.findDirectoryPath(INSTALLER_PATH_SEGMENTS)
-                    ?: throw IllegalArgumentException(
-                        "Esse GOD não contém content/0000000000000000/FFED2000/FFFFFFFF. Ele parece ser um disco/jogo normal, não um instalador desse tipo.",
-                    )
-
-                val entries = image.listDirectory(payloadDirectory)
-                    .filter { !it.isDirectory }
-                    .sortedBy { it.name.lowercase() }
-                if (entries.isEmpty()) {
-                    throw IllegalArgumentException("FFFFFFFF existe dentro do GOD, mas está vazia.")
-                }
-
-                for (entry in entries) {
-                    if (entry.size < StfsHeaderReader.REQUIRED_BYTES) {
-                        issues += RepairIssue(
-                            severity = RepairSeverity.Warning,
-                            message = "${entry.name} é pequeno demais para STFS e foi ignorado.",
-                            sourcePath = INSTALLER_PATH + "/${entry.name}",
-                        )
-                        continue
-                    }
-
-                    val metadataAttempt = runCatching {
-                        StfsHeaderReader.inspect(
-                            image.readEntryPrefix(entry, StfsHeaderReader.REQUIRED_BYTES),
-                        )
-                    }
-                    if (metadataAttempt.isFailure) {
-                        issues += RepairIssue(
-                            severity = RepairSeverity.Warning,
-                            message = "${entry.name} ignorado: ${metadataAttempt.exceptionOrNull()?.message ?: "STFS inválido"}",
-                            sourcePath = INSTALLER_PATH + "/${entry.name}",
-                        )
-                        continue
-                    }
-
-                    val source = RepairSource(
-                        relativePath = INSTALLER_PATH + "/${entry.name}",
-                        fileName = entry.name,
-                        size = entry.size,
-                        kind = RepairSourceKind.GodEmbedded,
-                    )
-                    val actionAttempt = runCatching {
-                        StockDlcInstallerRule.plan(source, metadataAttempt.getOrThrow())
-                    }
-                    if (actionAttempt.isFailure) {
-                        issues += RepairIssue(
-                            severity = RepairSeverity.Warning,
-                            message = actionAttempt.exceptionOrNull()?.message
-                                ?: "Pacote interno não é DLC compatível.",
-                            sourcePath = source.relativePath,
-                        )
-                        continue
-                    }
-
-                    payloads += GodEmbeddedPayload(
-                        internalPath = source.relativePath,
-                        isoOffset = entry.byteOffset,
-                        action = actionAttempt.getOrThrow(),
-                    )
-                }
-            }
-
-            if (payloads.isEmpty()) {
-                throw IllegalArgumentException(
-                    "O instalador foi encontrado dentro do GOD, mas nenhum pacote DLC STFS válido pôde ser roteado.",
-                )
-            }
-
-            val exactCandidate = candidate.copy(
-                metadata = freshMetadata,
-                dataParts = currentParts,
-                estimatedIsoBytes = exactIsoBytes,
-            )
-            GodInstallerPlan(
-                candidate = exactCandidate,
-                tempIsoPath = tempIso.absolutePath,
-                tempIsoBytes = tempIso.length(),
-                hasXsfHeader = hasXsfHeader,
-                sectorCorrection = sectorCorrection,
-                detectedPayloadPath = INSTALLER_PATH,
-                payloads = payloads,
-                issues = issues,
-            )
-        } catch (error: Throwable) {
-            runCatching { tempIso.delete() }
-            throw error
-        }
-    }
+    ): GodInstallerPlan = ResumableGodAnalysisRepository(appContext, sessionFactory)
+        .analyze(candidate, requestedRoute, onProgress)
 
     suspend fun validatePlan(
         plan: GodInstallerPlan,
@@ -409,7 +243,8 @@ class GodInstallerRepository(
         onProgress: (GodRepairProgress) -> Unit = {},
     ): GodInstallerValidation = withContext(Dispatchers.IO) {
         val profile = requireProfile()
-        val temp = File(plan.tempIsoPath)
+        val direct = plan.tempIsoPath == DIRECT_GOD_SOURCE_MARKER
+        val temp = if (direct) null else File(plan.tempIsoPath)
 
         onProgress(
             GodRepairProgress(
@@ -422,12 +257,16 @@ class GodInstallerRepository(
         try {
             val checks = plan.payloads.mapIndexed { index, payload ->
                 val expected = payload.action.source.size
-                val localRegionExists = temp.isFile &&
-                    payload.isoOffset >= 0L &&
-                    payload.isoOffset + expected <= temp.length()
+                val sourceReady = if (direct) {
+                    plan.candidate.dataParts.isNotEmpty() && expected > 0L
+                } else {
+                    temp?.isFile == true &&
+                        payload.isoOffset >= 0L &&
+                        payload.isoOffset + expected <= temp.length()
+                }
                 val destinationSize = routed.session.size(payload.action.destinationPath)
                 val state = when {
-                    !localRegionExists -> GodPayloadState.TempSourceMissing
+                    !sourceReady -> GodPayloadState.TempSourceMissing
                     destinationSize == expected -> GodPayloadState.AlreadyCorrect
                     destinationSize == null -> GodPayloadState.Missing
                     else -> GodPayloadState.Conflict
@@ -464,17 +303,33 @@ class GodInstallerRepository(
         onProgress: (GodRepairProgress) -> Unit = {},
     ): GodInstallerExecution = withContext(Dispatchers.IO) {
         require(validation.canInstall) {
-            "Instalação bloqueada: existe conflito no destino ou a XISO temporária não está disponível."
+            "Instalação bloqueada: existe conflito no destino ou a fonte não está disponível."
         }
         val profile = requireProfile()
-        val temp = File(plan.tempIsoPath)
-        require(temp.isFile && temp.length() == plan.tempIsoBytes) {
-            "A XISO temporária mudou ou foi removida. Analise o GOD novamente."
+        val direct = plan.tempIsoPath == DIRECT_GOD_SOURCE_MARKER
+        val tempIso = if (direct) null else File(plan.tempIsoPath)
+
+        if (!direct) {
+            require(tempIso?.isFile == true && tempIso.length() == plan.tempIsoBytes) {
+                "A XISO temporária mudou ou foi removida. Analise o GOD novamente."
+            }
+        }
+
+        val freshParts = if (direct) {
+            refreshAndValidateParts(
+                profile = profile,
+                candidate = plan.candidate,
+                requestedRoute = validation.requestedRoute,
+                preferredRoute = validation.usedRoute,
+            )
+        } else {
+            emptyList()
         }
 
         val totalMissingBytes = validation.checks
             .filter { it.state == GodPayloadState.Missing }
             .sumOf { it.payload.action.source.size }
+        val totalWorkBytes = if (direct) totalMissingBytes * 2L else totalMissingBytes
         var completedPayloadBytes = 0L
         val results = mutableListOf<GodInstallResult>()
 
@@ -490,16 +345,30 @@ class GodInstallerRepository(
                 }
 
                 GodPayloadState.Missing -> {
-                    val result = installEmbeddedPayload(
-                        profile = profile,
-                        tempIso = temp,
-                        payload = check.payload,
-                        requestedRoute = validation.requestedRoute,
-                        preferredRoute = validation.usedRoute,
-                        baseCompletedBytes = completedPayloadBytes,
-                        totalBytes = totalMissingBytes,
-                        onProgress = onProgress,
-                    )
+                    val result = if (direct) {
+                        installDirectEmbeddedPayload(
+                            profile = profile,
+                            plan = plan,
+                            parts = freshParts,
+                            payload = check.payload,
+                            requestedRoute = validation.requestedRoute,
+                            preferredRoute = validation.usedRoute,
+                            baseWorkBytes = completedPayloadBytes * 2L,
+                            totalWorkBytes = totalWorkBytes,
+                            onProgress = onProgress,
+                        )
+                    } else {
+                        installEmbeddedPayload(
+                            profile = profile,
+                            tempIso = requireNotNull(tempIso),
+                            payload = check.payload,
+                            requestedRoute = validation.requestedRoute,
+                            preferredRoute = validation.usedRoute,
+                            baseCompletedBytes = completedPayloadBytes,
+                            totalBytes = totalMissingBytes,
+                            onProgress = onProgress,
+                        )
+                    }
                     results += result
                     if (result.status == GodInstallStatus.Installed) {
                         completedPayloadBytes += check.payload.action.source.size
@@ -527,12 +396,20 @@ class GodInstallerRepository(
             onProgress(
                 GodRepairProgress(
                     stage = GodRepairStage.CleaningTemp,
-                    message = "Pacotes verificados. Limpando a XISO temporária do celular...",
-                    completedBytes = totalMissingBytes,
-                    totalBytes = totalMissingBytes,
+                    message = if (direct) {
+                        "Pacotes verificados. Limpando apenas o cache de extração direta..."
+                    } else {
+                        "Pacotes verificados. Limpando a XISO temporária do celular..."
+                    },
+                    completedBytes = totalWorkBytes,
+                    totalBytes = totalWorkBytes,
                 ),
             )
-            runCatching { !temp.exists() || temp.delete() }.getOrDefault(false)
+            if (direct) {
+                cleanupDirectPayloadTemps(plan)
+            } else {
+                runCatching { tempIso == null || !tempIso.exists() || tempIso.delete() }.getOrDefault(false)
+            }
         } else {
             false
         }
@@ -543,19 +420,180 @@ class GodInstallerRepository(
         )
     }
 
-    fun discardTemp(plan: GodInstallerPlan): Boolean {
+    fun discardTemp(plan: GodInstallerPlan): Boolean = if (plan.tempIsoPath == DIRECT_GOD_SOURCE_MARKER) {
+        cleanupDirectPayloadTemps(plan)
+    } else {
         val file = File(plan.tempIsoPath)
-        return !file.exists() || file.delete()
+        !file.exists() || file.delete()
     }
 
-    private suspend fun installEmbeddedPayload(
+    private suspend fun installDirectEmbeddedPayload(
         profile: XboxProfile,
-        tempIso: File,
+        plan: GodInstallerPlan,
+        parts: List<GodDataPart>,
         payload: GodEmbeddedPayload,
         requestedRoute: FtpRoute,
         preferredRoute: FtpRoute,
-        baseCompletedBytes: Long,
-        totalBytes: Long,
+        baseWorkBytes: Long,
+        totalWorkBytes: Long,
+        onProgress: (GodRepairProgress) -> Unit,
+    ): GodInstallResult {
+        val expectedSize = payload.action.source.size
+        val staged = directPayloadTempFile(plan, payload)
+        ensurePayloadTempSpace(staged.parentFile!!, expectedSize, staged.length())
+
+        if (!staged.isFile || staged.length() != expectedSize) {
+            runCatching { staged.delete() }
+            extractDirectPayload(
+                profile = profile,
+                plan = plan,
+                parts = parts,
+                payload = payload,
+                destination = staged,
+                requestedRoute = requestedRoute,
+                preferredRoute = preferredRoute,
+                baseWorkBytes = baseWorkBytes,
+                totalWorkBytes = totalWorkBytes,
+                onProgress = onProgress,
+            )
+        }
+
+        require(staged.isFile && staged.length() == expectedSize) {
+            "Extração direta ficou com ${staged.length()} bytes; esperado $expectedSize."
+        }
+
+        val result = uploadStagedPayload(
+            profile = profile,
+            staged = staged,
+            payload = payload,
+            requestedRoute = requestedRoute,
+            preferredRoute = preferredRoute,
+            baseWorkBytes = baseWorkBytes + expectedSize,
+            totalWorkBytes = totalWorkBytes,
+            onProgress = onProgress,
+        )
+        if (result.status == GodInstallStatus.Installed || result.status == GodInstallStatus.AlreadyCorrect) {
+            runCatching { staged.delete() }
+        }
+        return result
+    }
+
+    private suspend fun extractDirectPayload(
+        profile: XboxProfile,
+        plan: GodInstallerPlan,
+        parts: List<GodDataPart>,
+        payload: GodEmbeddedPayload,
+        destination: File,
+        requestedRoute: FtpRoute,
+        preferredRoute: FtpRoute,
+        baseWorkBytes: Long,
+        totalWorkBytes: Long,
+        onProgress: (GodRepairProgress) -> Unit,
+    ) {
+        destination.parentFile?.mkdirs()
+        FileOutputStream(destination, false).use { }
+        val slices = GodPayloadSlicePlanner.plan(
+            parts = parts,
+            hasXsfHeader = plan.hasXsfHeader,
+            isoOffset = payload.isoOffset,
+            length = payload.action.source.size,
+        )
+        var extractedBeforeSlice = 0L
+
+        for (slice in slices) {
+            val sliceStart = destination.length()
+            var lastFailure: Throwable? = null
+            var completed = false
+
+            for (route in routeOrder(requestedRoute, preferredRoute)) {
+                RandomAccessFile(destination, "rw").use { it.setLength(sliceStart) }
+                val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
+                if (routedAttempt.isFailure) {
+                    val error = routedAttempt.exceptionOrNull()
+                    if (error is CancellationException) throw error
+                    lastFailure = error
+                    continue
+                }
+                val session = routedAttempt.getOrThrow().session
+                try {
+                    val rawOffset = GodContainerFormat.rawOffsetForPayloadOffset(slice.payloadOffsetInPart)
+                    val attempt = runCatching {
+                        FileOutputStream(destination, true).use { fileOutput ->
+                            val bounded = SliceBoundedOutputStream(
+                                delegate = fileOutput,
+                                limit = slice.payloadBytes,
+                            )
+                            val decoder = GodDataPartPayloadOutputStream(
+                                delegate = bounded,
+                                initialRawPosition = rawOffset,
+                            )
+                            try {
+                                session.downloadFromOffset(
+                                    canonicalPath = slice.part.canonicalPath,
+                                    offset = rawOffset,
+                                    destination = decoder,
+                                ) {
+                                    onProgress(
+                                        GodRepairProgress(
+                                            stage = GodRepairStage.InstallingPayloads,
+                                            message = "Extraindo ${payload.action.source.fileName} do GOD • ${route.name.uppercase()} • Data${slice.partIndex.toString().padStart(4, '0')}",
+                                            completedBytes = baseWorkBytes + extractedBeforeSlice + bounded.written,
+                                            totalBytes = totalWorkBytes,
+                                        ),
+                                    )
+                                }
+                            } catch (complete: PayloadSliceCompleteException) {
+                                if (bounded.written != slice.payloadBytes) throw complete
+                            }
+                            fileOutput.fd.sync()
+                            require(bounded.written == slice.payloadBytes) {
+                                "${slice.part.name}: extraídos ${bounded.written} bytes; esperado ${slice.payloadBytes}."
+                            }
+                        }
+                    }
+                    if (attempt.isSuccess) {
+                        completed = true
+                        break
+                    }
+                    val error = attempt.exceptionOrNull()
+                    if (error is CancellationException) throw error
+                    lastFailure = error
+                } finally {
+                    runCatching { session.close() }
+                }
+            }
+
+            if (!completed) {
+                RandomAccessFile(destination, "rw").use { it.setLength(sliceStart) }
+                throw IllegalStateException(
+                    "Não foi possível extrair ${slice.part.name} por nenhuma rota FTP.",
+                    lastFailure,
+                )
+            }
+            extractedBeforeSlice += slice.payloadBytes
+        }
+
+        require(destination.length() == payload.action.source.size) {
+            "Payload direto ficou com ${destination.length()} bytes; esperado ${payload.action.source.size}."
+        }
+        onProgress(
+            GodRepairProgress(
+                stage = GodRepairStage.InstallingPayloads,
+                message = "${payload.action.source.fileName} extraído do GOD sem reconstruir a XISO completa.",
+                completedBytes = baseWorkBytes + payload.action.source.size,
+                totalBytes = totalWorkBytes,
+            ),
+        )
+    }
+
+    private suspend fun uploadStagedPayload(
+        profile: XboxProfile,
+        staged: File,
+        payload: GodEmbeddedPayload,
+        requestedRoute: FtpRoute,
+        preferredRoute: FtpRoute,
+        baseWorkBytes: Long,
+        totalWorkBytes: Long,
         onProgress: (GodRepairProgress) -> Unit,
     ): GodInstallResult {
         val destination = payload.action.destinationPath
@@ -565,7 +603,9 @@ class GodInstallerRepository(
         for (route in routeOrder(requestedRoute, preferredRoute)) {
             val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
             if (routedAttempt.isFailure) {
-                lastFailure = routedAttempt.exceptionOrNull()
+                val error = routedAttempt.exceptionOrNull()
+                if (error is CancellationException) throw error
+                lastFailure = error
                 continue
             }
             val session = routedAttempt.getOrThrow().session
@@ -588,34 +628,23 @@ class GodInstallerRepository(
                     )
                 }
 
-                onProgress(
-                    GodRepairProgress(
-                        stage = GodRepairStage.InstallingPayloads,
-                        message = "Instalando ${payload.action.source.fileName} via ${route.name.uppercase()}...",
-                        completedBytes = baseCompletedBytes,
-                        totalBytes = totalBytes,
-                    ),
-                )
-
                 val uploadAttempt = runCatching {
                     session.upload(
                         canonicalPath = destination,
-                        source = FileRegionInputStream(
-                            file = tempIso,
-                            offset = payload.isoOffset,
-                            length = expectedSize,
-                        ),
+                        source = FileInputStream(staged),
                     ) { sent ->
                         onProgress(
                             GodRepairProgress(
                                 stage = GodRepairStage.InstallingPayloads,
-                                message = "${payload.action.source.fileName} • ${route.name.uppercase()}",
-                                completedBytes = baseCompletedBytes + sent,
-                                totalBytes = totalBytes,
+                                message = "Enviando ${payload.action.source.fileName} • ${route.name.uppercase()}",
+                                completedBytes = baseWorkBytes + sent,
+                                totalBytes = totalWorkBytes,
                             ),
                         )
                     }
                 }
+                val uploadError = uploadAttempt.exceptionOrNull()
+                if (uploadError is CancellationException) throw uploadError
 
                 val after = runCatching { session.size(destination) }.getOrNull()
                 if (after == expectedSize) {
@@ -623,21 +652,20 @@ class GodInstallerRepository(
                         GodRepairProgress(
                             stage = GodRepairStage.Verifying,
                             message = "${payload.action.source.fileName} verificado por SIZE.",
-                            completedBytes = baseCompletedBytes + expectedSize,
-                            totalBytes = totalBytes,
+                            completedBytes = baseWorkBytes + expectedSize,
+                            totalBytes = totalWorkBytes,
                         ),
                     )
                     return GodInstallResult(
                         payload = payload,
                         status = GodInstallStatus.Installed,
                         route = route,
-                        message = "Extraído do GOD, enviado ao destino correto e verificado por SIZE.",
+                        message = "Extraído diretamente do GOD, enviado ao destino correto e verificado por SIZE.",
                     )
                 }
 
-                lastFailure = uploadAttempt.exceptionOrNull()
+                lastFailure = uploadError
                     ?: IllegalStateException("SIZE pós-upload foi ${after ?: "ausente"}; esperado $expectedSize.")
-
                 if (after != null) {
                     val cleaned = runCatching {
                         session.delete(destination)
@@ -665,77 +693,98 @@ class GodInstallerRepository(
         )
     }
 
-    private suspend fun reconstructIso(
+    private suspend fun installEmbeddedPayload(
         profile: XboxProfile,
-        parts: List<GodDataPart>,
-        output: File,
-        hasXsfHeader: Boolean,
+        tempIso: File,
+        payload: GodEmbeddedPayload,
         requestedRoute: FtpRoute,
         preferredRoute: FtpRoute,
+        baseCompletedBytes: Long,
+        totalBytes: Long,
         onProgress: (GodRepairProgress) -> Unit,
-    ) {
-        output.parentFile?.mkdirs()
-        FileOutputStream(output, false).use { stream ->
-            if (!hasXsfHeader) {
-                stream.write(ByteArray(GodContainerFormat.SYNTHETIC_XSF_HEADER_BYTES))
+    ): GodInstallResult {
+        val destination = payload.action.destinationPath
+        val expectedSize = payload.action.source.size
+        var lastFailure: Throwable? = null
+
+        for (route in routeOrder(requestedRoute, preferredRoute)) {
+            val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
+            if (routedAttempt.isFailure) {
+                val error = routedAttempt.exceptionOrNull()
+                if (error is CancellationException) throw error
+                lastFailure = error
+                continue
+            }
+            val session = routedAttempt.getOrThrow().session
+            try {
+                val before = session.size(destination)
+                if (before == expectedSize) {
+                    return GodInstallResult(
+                        payload = payload,
+                        status = GodInstallStatus.AlreadyCorrect,
+                        route = route,
+                        message = "O destino ficou correto antes do upload; nada foi sobrescrito.",
+                    )
+                }
+                if (before != null) {
+                    return GodInstallResult(
+                        payload = payload,
+                        status = GodInstallStatus.Failed,
+                        route = route,
+                        message = "Destino passou a existir com tamanho diferente; upload bloqueado.",
+                    )
+                }
+
+                val uploadAttempt = runCatching {
+                    session.upload(
+                        canonicalPath = destination,
+                        source = FileRegionInputStream(
+                            file = tempIso,
+                            offset = payload.isoOffset,
+                            length = expectedSize,
+                        ),
+                    ) { sent ->
+                        onProgress(
+                            GodRepairProgress(
+                                stage = GodRepairStage.InstallingPayloads,
+                                message = "${payload.action.source.fileName} • ${route.name.uppercase()}",
+                                completedBytes = baseCompletedBytes + sent,
+                                totalBytes = totalBytes,
+                            ),
+                        )
+                    }
+                }
+                val uploadError = uploadAttempt.exceptionOrNull()
+                if (uploadError is CancellationException) throw uploadError
+                val after = runCatching { session.size(destination) }.getOrNull()
+                if (after == expectedSize) {
+                    return GodInstallResult(
+                        payload = payload,
+                        status = GodInstallStatus.Installed,
+                        route = route,
+                        message = "Extraído do GOD, enviado ao destino correto e verificado por SIZE.",
+                    )
+                }
+                lastFailure = uploadError
+                    ?: IllegalStateException("SIZE pós-upload foi ${after ?: "ausente"}; esperado $expectedSize.")
+                if (after != null) {
+                    val cleaned = runCatching {
+                        session.delete(destination)
+                        session.size(destination) == null
+                    }.getOrDefault(false)
+                    if (!cleaned) break
+                }
+            } finally {
+                runCatching { session.close() }
             }
         }
 
-        val totalRawBytes = parts.sumOf(GodDataPart::rawSize)
-        var completedRawBytes = 0L
-
-        for ((index, part) in parts.withIndex()) {
-            val partStart = output.length()
-            var lastFailure: Throwable? = null
-            var completed = false
-
-            for (route in routeOrder(requestedRoute, preferredRoute)) {
-                RandomAccessFile(output, "rw").use { it.setLength(partStart) }
-                val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
-                if (routedAttempt.isFailure) {
-                    lastFailure = routedAttempt.exceptionOrNull()
-                    continue
-                }
-                val session = routedAttempt.getOrThrow().session
-                try {
-                    val partAttempt = runCatching {
-                        FileOutputStream(output, true).use { fileOutput ->
-                            val payloadOutput = GodDataPartPayloadOutputStream(fileOutput)
-                            session.download(part.canonicalPath, payloadOutput) { received ->
-                                onProgress(
-                                    GodRepairProgress(
-                                        stage = GodRepairStage.ReconstructingIso,
-                                        message = "GOD → XISO ${index + 1}/${parts.size} • ${part.name} • ${route.name.uppercase()}",
-                                        completedBytes = completedRawBytes + received,
-                                        totalBytes = totalRawBytes,
-                                    ),
-                                )
-                            }
-                            payloadOutput.flush()
-                            require(payloadOutput.payloadBytesWritten == part.payloadSize) {
-                                "${part.name}: payload ${payloadOutput.payloadBytesWritten}, esperado ${part.payloadSize}."
-                            }
-                        }
-                    }
-                    if (partAttempt.isSuccess) {
-                        completed = true
-                        break
-                    }
-                    lastFailure = partAttempt.exceptionOrNull()
-                } finally {
-                    runCatching { session.close() }
-                }
-            }
-
-            if (!completed) {
-                RandomAccessFile(output, "rw").use { it.setLength(partStart) }
-                throw IllegalStateException(
-                    "Não foi possível reconstruir ${part.name} por Aurora nem FTPdll.",
-                    lastFailure,
-                )
-            }
-            completedRawBytes += part.rawSize
-        }
+        return GodInstallResult(
+            payload = payload,
+            status = GodInstallStatus.Failed,
+            route = null,
+            message = "Aurora e FTPdll não conseguiram instalar o pacote: ${lastFailure?.message ?: "sem detalhe"}",
+        )
     }
 
     private suspend fun refreshAndValidateParts(
@@ -748,7 +797,9 @@ class GodInstallerRepository(
         for (route in routeOrder(requestedRoute, preferredRoute)) {
             val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
             if (routedAttempt.isFailure) {
-                lastFailure = routedAttempt.exceptionOrNull()
+                val error = routedAttempt.exceptionOrNull()
+                if (error is CancellationException) throw error
+                lastFailure = error
                 continue
             }
             val session = routedAttempt.getOrThrow().session
@@ -762,9 +813,11 @@ class GodInstallerRepository(
                 val expected = candidate.dataParts.associate { it.name.lowercase() to it.rawSize }
                 val actual = freshParts.associate { it.name.lowercase() to it.rawSize }
                 require(expected == actual) {
-                    "Os DataNNNN mudaram desde o scan. Escaneie novamente antes de analisar."
+                    "Os DataNNNN mudaram desde o scan. Escaneie novamente antes de instalar."
                 }
                 return freshParts
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 lastFailure = error
             } finally {
@@ -783,7 +836,6 @@ class GodInstallerRepository(
             session.list(root)
             return listOf(root)
         }
-
         val rootListing = session.list(root)
         if (TITLE_ID_REGEX.matches(last)) {
             val direct = rootListing.firstOrNull {
@@ -829,12 +881,16 @@ class GodInstallerRepository(
         for (route in routeOrder(requestedRoute, preferredRoute)) {
             val routedAttempt = runCatching { sessionFactory.connect(profile, route) }
             if (routedAttempt.isFailure) {
-                lastFailure = routedAttempt.exceptionOrNull()
+                val error = routedAttempt.exceptionOrNull()
+                if (error is CancellationException) throw error
+                lastFailure = error
                 continue
             }
             val session = routedAttempt.getOrThrow().session
             try {
                 return session.readPrefixAndClose(canonicalPath, byteCount) to route
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 lastFailure = error
             } finally {
@@ -847,13 +903,33 @@ class GodInstallerRepository(
         )
     }
 
-    private fun ensureTempSpace(directory: File, requiredBytes: Long) {
-        require(requiredBytes > 0L) { "Tamanho reconstruído do GOD inválido." }
+    private fun ensurePayloadTempSpace(directory: File, requiredBytes: Long, alreadyPresent: Long) {
+        val additional = (requiredBytes - alreadyPresent).coerceAtLeast(0L)
+        if (additional == 0L) return
         val available = StatFs(directory.absolutePath).availableBytes
-        val requiredWithReserve = requiredBytes + TEMP_FREE_RESERVE_BYTES
+        val requiredWithReserve = additional + TEMP_FREE_RESERVE_BYTES
         require(available >= requiredWithReserve) {
-            "Espaço insuficiente no celular para analisar esse GOD. Livre: ${formatBytes(available)}; necessário: aproximadamente ${formatBytes(requiredWithReserve)}. O arquivo temporário é apagado após um reparo concluído."
+            "Espaço insuficiente no celular para extrair o pacote necessário. Livre: ${formatBytes(available)}; necessário: aproximadamente ${formatBytes(requiredWithReserve)}. A XISO completa não será criada."
         }
+    }
+
+    private fun directPayloadTempFile(plan: GodInstallerPlan, payload: GodEmbeddedPayload): File {
+        val key = Integer.toHexString(
+            (plan.candidate.headerPath.lowercase() + "|" + payload.action.source.fileName.lowercase()).hashCode(),
+        )
+        return File(
+            tempDirectory(),
+            "${plan.candidate.metadata.titleId}_${safeTempName(payload.action.source.fileName)}_${payload.action.source.size}_$key.payload.tmp",
+        )
+    }
+
+    private fun cleanupDirectPayloadTemps(plan: GodInstallerPlan): Boolean {
+        var ok = true
+        for (payload in plan.payloads) {
+            val file = directPayloadTempFile(plan, payload)
+            if (file.exists() && !file.delete()) ok = false
+        }
+        return ok
     }
 
     private fun tempDirectory(): File =
@@ -865,7 +941,8 @@ class GodInstallerRepository(
         val directory = tempDirectory()
         val cutoff = System.currentTimeMillis() - TEMP_MAX_AGE_MS
         directory.listFiles()?.forEach { file ->
-            if (file.isFile && file.name.endsWith(".xiso.tmp") && file.lastModified() < cutoff) {
+            if (!file.isFile || file.lastModified() >= cutoff) return@forEach
+            if (file.name.endsWith(".xiso.tmp") || file.name.endsWith(".payload.tmp")) {
                 runCatching { file.delete() }
             }
         }
@@ -901,6 +978,33 @@ class GodInstallerRepository(
         else -> "$bytes B"
     }
 
+    private class SliceBoundedOutputStream(
+        private val delegate: OutputStream,
+        private val limit: Long,
+    ) : OutputStream() {
+        var written: Long = 0L
+            private set
+
+        override fun write(value: Int) {
+            val one = byteArrayOf(value.toByte())
+            write(one, 0, 1)
+        }
+
+        override fun write(buffer: ByteArray, offset: Int, length: Int) {
+            if (written >= limit) throw PayloadSliceCompleteException()
+            val count = min(length.toLong(), limit - written).toInt()
+            if (count > 0) {
+                delegate.write(buffer, offset, count)
+                written += count
+            }
+            if (count < length || written >= limit) throw PayloadSliceCompleteException()
+        }
+
+        override fun flush() = delegate.flush()
+    }
+
+    private class PayloadSliceCompleteException : IOException("requested GOD payload slice complete")
+
     private class FileRegionInputStream(
         file: File,
         offset: Long,
@@ -932,9 +1036,7 @@ class GodInstallerRepository(
             return read
         }
 
-        override fun close() {
-            input.close()
-        }
+        override fun close() = input.close()
     }
 
     companion object {
@@ -945,12 +1047,5 @@ class GodInstallerRepository(
         private const val TEMP_MAX_AGE_MS = 24L * 60L * 60L * 1000L
         private val TITLE_ID_REGEX = Regex("^[0-9A-Fa-f]{8}$")
         private val DATA_PART_REGEX = Regex("^Data\\d{4}$", RegexOption.IGNORE_CASE)
-        private val INSTALLER_PATH_SEGMENTS = listOf(
-            "content",
-            "0000000000000000",
-            "FFED2000",
-            "FFFFFFFF",
-        )
-        private const val INSTALLER_PATH = "content/0000000000000000/FFED2000/FFFFFFFF"
     }
 }
