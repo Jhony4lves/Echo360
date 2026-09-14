@@ -153,9 +153,13 @@ fun XboxEchoFixSection(modifier: Modifier = Modifier) {
         }
     }
 
+    val planClean = plan?.let { current ->
+        current.actions.isEmpty() && current.issues.none { it.severity == RepairSeverity.Error }
+    } == true
+
     EchoPanel(
         modifier = modifier.fillMaxWidth(),
-        highlighted = plan?.canExecute == true,
+        highlighted = plan?.canExecute == true || planClean,
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -181,9 +185,10 @@ fun XboxEchoFixSection(modifier: Modifier = Modifier) {
                         moving -> "MOVING"
                         validation?.canMove == true -> "READY"
                         plan?.canExecute == true -> "PLAN OK"
+                        planClean -> "CLEAN"
                         else -> "PRIMARY"
                     },
-                    active = plan?.canExecute == true,
+                    active = plan?.canExecute == true || planClean,
                 )
             }
 
@@ -252,6 +257,9 @@ fun XboxEchoFixSection(modifier: Modifier = Modifier) {
             }
 
             plan?.let { current ->
+                val currentClean = current.actions.isEmpty() &&
+                    current.issues.none { it.severity == RepairSeverity.Error }
+
                 HorizontalDivider(color = EchoColors.Border)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -272,8 +280,12 @@ fun XboxEchoFixSection(modifier: Modifier = Modifier) {
                         )
                     }
                     EchoStatusPill(
-                        text = if (current.canExecute) "PLANO OK" else "REVISAR",
-                        active = current.canExecute,
+                        text = when {
+                            current.canExecute -> "PLANO OK"
+                            currentClean -> "LIMPO"
+                            else -> "REVISAR"
+                        },
+                        active = current.canExecute || currentClean,
                     )
                 }
 
