@@ -54,8 +54,8 @@ class EchoFixRepository(
                 selectedRootUri = treeUri.toString(),
                 issues = listOf(
                     RepairIssue(
-                        severity = RepairSeverity.Error,
-                        message = "Não encontrei content/0000000000000000/FFED2000/FFFFFFFF nessa pasta.",
+                        severity = RepairSeverity.Info,
+                        message = "Nenhum instalador exposto com arquivos foi encontrado nessa pasta.",
                     ),
                 ),
             )
@@ -68,7 +68,7 @@ class EchoFixRepository(
         if (payloadFiles.isEmpty()) {
             issues += RepairIssue(
                 severity = RepairSeverity.Error,
-                message = "A pasta FFFFFFFF foi encontrada, mas não contém arquivos.",
+                message = "O instalador mudou durante a leitura e a pasta FFFFFFFF ficou vazia. Escaneie novamente.",
                 sourcePath = payload.relativePath,
             )
         }
@@ -157,6 +157,7 @@ class EchoFixRepository(
         val issues = mutableListOf<RepairIssue>()
         val remoteFiles = mutableListOf<RemotePayloadFile>()
         val payloadPaths = linkedSetOf<String>()
+        val emptyPayloadPaths = linkedSetOf<String>()
 
         val routed = sessionFactory.connect(profile, requestedRoute)
         val preferredRoute = routed.route
@@ -166,6 +167,7 @@ class EchoFixRepository(
                 root = canonicalRoot,
                 files = remoteFiles,
                 payloadPaths = payloadPaths,
+                emptyPayloadPaths = emptyPayloadPaths,
                 issues = issues,
             )
         } finally {
@@ -174,11 +176,11 @@ class EchoFixRepository(
 
         if (remoteFiles.isEmpty()) {
             issues += RepairIssue(
-                severity = RepairSeverity.Error,
-                message = if (payloadPaths.isEmpty()) {
-                    "Nenhum content/0000000000000000/FFED2000/FFFFFFFF foi encontrado em $canonicalRoot."
+                severity = RepairSeverity.Info,
+                message = if (emptyPayloadPaths.isNotEmpty()) {
+                    "Nenhum instalador exposto com arquivos foi encontrado em $canonicalRoot. ${emptyPayloadPaths.size} pasta(s) FFFFFFFF vazia(s) foram ignorada(s)."
                 } else {
-                    "O instalador foi encontrado, mas a pasta FFFFFFFF não contém arquivos."
+                    "Nenhum instalador exposto com arquivos foi encontrado em $canonicalRoot."
                 },
                 sourcePath = canonicalRoot,
             )
@@ -234,7 +236,7 @@ class EchoFixRepository(
             actions += actionAttempt.getOrThrow()
         }
 
-        if (actions.isEmpty() && issues.none { it.severity == RepairSeverity.Error }) {
+        if (remoteFiles.isNotEmpty() && actions.isEmpty() && issues.none { it.severity == RepairSeverity.Error }) {
             issues += RepairIssue(
                 severity = RepairSeverity.Error,
                 message = "Nenhum pacote STFS DLC válido foi encontrado nos instaladores detectados.",
@@ -566,6 +568,7 @@ class EchoFixRepository(
         root: String,
         files: MutableList<RemotePayloadFile>,
         payloadPaths: MutableSet<String>,
+        emptyPayloadPaths: MutableSet<String>,
         issues: MutableList<RepairIssue>,
     ) {
         val probedPayloads = linkedSetOf<String>()
@@ -574,8 +577,13 @@ class EchoFixRepository(
             val canonical = XboxPath.canonical(candidate)
             if (!probedPayloads.add(canonical.lowercase())) return false
             val listing = runCatching { session.list(canonical) }.getOrNull() ?: return false
+            val payloadFiles = listing.filter { !it.isDirectory }
+            if (payloadFiles.isEmpty()) {
+                emptyPayloadPaths += canonical
+                return false
+            }
             payloadPaths += canonical
-            listing.filter { !it.isDirectory }.forEach { entry ->
+            payloadFiles.forEach { entry ->
                 files += RemotePayloadFile(
                     name = entry.name,
                     canonicalPath = entry.canonicalPath,
@@ -677,24 +685,32 @@ class EchoFixRepository(
         val rootName = root.name.orEmpty()
         when {
             rootName.equals("FFFFFFFF", ignoreCase = true) -> {
-                return PayloadDirectory(root, "FFFFFFFF")
+                if (payloadHasFiles(root)) {
+                    return PayloadDirectory(root, "FFFFFFFF")
+                }
             }
 
             rootName.equals("FFED2000", ignoreCase = true) -> {
-                findChildDirectory(root, "FFFFFFFF")?.let {
-                    return PayloadDirectory(it, "FFED2000/FFFFFFFF")
+                findChildDirectory(root, "FFFFFFFF")?.let { payload ->
+                    if (payloadHasFiles(payload)) {
+                        return PayloadDirectory(payload, "FFED2000/FFFFFFFF")
+                    }
                 }
             }
 
             rootName.equals("0000000000000000", ignoreCase = true) -> {
-                findPath(root, listOf("FFED2000", "FFFFFFFF"))?.let {
-                    return PayloadDirectory(it, "0000000000000000/FFED2000/FFFFFFFF")
+                findPath(root, listOf("FFED2000", "FFFFFFFF"))?.let { payload ->
+                    if (payloadHasFiles(payload)) {
+                        return PayloadDirectory(payload, "0000000000000000/FFED2000/FFFFFFFF")
+                    }
                 }
             }
 
             rootName.equals("content", ignoreCase = true) -> {
-                findPath(root, listOf("0000000000000000", "FFED2000", "FFFFFFFF"))?.let {
-                    return PayloadDirectory(it, "content/0000000000000000/FFED2000/FFFFFFFF")
+                findPath(root, listOf("0000000000000000", "FFED2000", "FFFFFFFF"))?.let { payload ->
+                    if (payloadHasFiles(payload)) {
+                        return PayloadDirectory(payload, "content/0000000000000000/FFED2000/FFFFFFFF")
+                    }
                 }
             }
         }
@@ -722,10 +738,12 @@ class EchoFixRepository(
                             child,
                             listOf("0000000000000000", "FFED2000", "FFFFFFFF"),
                         )?.let { payload ->
-                            val prefix = listOf(relative, "0000000000000000/FFED2000/FFFFFFFF")
-                                .filter(String::isNotBlank)
-                                .joinToString("/")
-                            return PayloadDirectory(payload, prefix)
+                            if (payloadHasFiles(payload)) {
+                                val prefix = listOf(relative, "0000000000000000/FFED2000/FFFFFFFF")
+                                    .filter(String::isNotBlank)
+                                    .joinToString("/")
+                                return PayloadDirectory(payload, prefix)
+                            }
                         }
                     }
 
@@ -735,6 +753,9 @@ class EchoFixRepository(
 
         return null
     }
+
+    private fun payloadHasFiles(directory: DocumentFile): Boolean =
+        directory.listFiles().any { it.isFile }
 
     private fun findPath(start: DocumentFile, segments: List<String>): DocumentFile? {
         var current = start
