@@ -178,7 +178,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
             candidate = candidate,
         )
         backgroundJob = jobStore.snapshot()
-        infoMessage = "Análise iniciada em segundo plano. Você pode sair do app ou apagar a tela; o checkpoint será salvo durante a reconstrução."
+        infoMessage = "Quick Probe iniciado em segundo plano. Você pode sair do app ou apagar a tela; o EchoFix lê somente as faixas necessárias do GOD e mantém o original intacto."
     }
 
     fun loadBackgroundResult() {
@@ -196,7 +196,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                 progress = null
                 jobStore.clear()
                 backgroundJob = jobStore.snapshot()
-                infoMessage = "Instalador encontrado. O resultado retomável foi carregado; revise o plano antes de validar destinos."
+                infoMessage = "Instalador encontrado. O resultado do Quick Probe foi carregado; revise o plano antes de validar destinos."
             }.onFailure { error ->
                 progress = null
                 errorMessage = error.message ?: "Não foi possível carregar a análise concluída."
@@ -237,8 +237,6 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                 execution = result
                 progress = null
                 if (result.succeeded) {
-                    // executePlan removes the XISO; this also removes the tiny
-                    // resumable sidecar checkpoint that belongs to it.
                     runCatching { resumableRepository.discard(current) }
                     infoMessage = buildString {
                         append(result.installedCount)
@@ -247,7 +245,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                         append(" já estava(m) correto(s). ")
                         append(
                             if (result.tempIsoDeleted) {
-                                "Cache XISO temporário removido."
+                                "Cache temporário removido."
                             } else {
                                 "O reparo terminou, mas o cache temporário não pôde ser removido automaticamente."
                             },
@@ -289,7 +287,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                 }
                 EchoStatusPill(
                     text = when {
-                        backgroundRunning -> "BACKGROUND"
+                        backgroundRunning -> "QUICK PROBE"
                         installing -> "INSTALLING"
                         analyzing -> "LOADING"
                         plan?.canExecute == true -> "PLAN OK"
@@ -300,13 +298,13 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
             }
 
             Text(
-                "Para jogos/discos baixados como GOD quando o conteúdo instalável ficou preso dentro do container. A reconstrução grande roda em serviço foreground e grava checkpoints retomáveis no celular.",
+                "Para jogos/discos baixados como GOD quando o conteúdo instalável ficou preso dentro do container. A análise usa Quick Probe esparso: lê só diretórios XDVDFS e pequenos headers STFS, sem reconstruir uma XISO de vários GB para descobrir o conteúdo.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
 
             Text(
-                "Pode sair do app, bloquear a tela ou voltar depois. Se o processo cair, o EchoFix retoma do último checkpoint em vez de começar o GOD do zero.",
+                "Pode sair do app, bloquear a tela ou voltar depois. O serviço preserva o estado da análise; a extração grande só acontece se um pacote necessário for encontrado e você mandar instalar.",
                 style = MaterialTheme.typography.labelMedium,
                 color = EchoColors.SignalGreen,
                 fontWeight = FontWeight.SemiBold,
@@ -346,7 +344,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                 backgroundJob.error?.let { detail ->
                     GodFixMessage(
                         Icons.Outlined.WarningAmber,
-                        "$detail O progresso anterior foi preservado.",
+                        "$detail O estado da análise foi preservado.",
                         EchoColors.Warning,
                     )
                 }
@@ -361,7 +359,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Icon(Icons.Outlined.Pause, contentDescription = null)
-                            Text(" PAUSAR E GUARDAR CHECKPOINT")
+                            Text(" PAUSAR QUICK PROBE")
                         }
                     }
 
@@ -380,7 +378,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                             ),
                         ) {
                             Icon(Icons.Outlined.PlayArrow, contentDescription = null)
-                            Text(" RETOMAR DO CHECKPOINT")
+                            Text(" RETOMAR QUICK PROBE")
                         }
                     }
 
@@ -448,7 +446,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
             }
 
             Text(
-                "Padrão: /Hdd1/Content/0000000000000000. A busca inicial lê apenas diretórios e pequenos headers STFS; a reconstrução grande só começa após sua confirmação.",
+                "Padrão: /Hdd1/Content/0000000000000000. A busca e o Quick Probe leem apenas diretórios, headers e faixas pequenas; a extração do pacote só começa depois da validação dos destinos e da sua confirmação.",
                 style = MaterialTheme.typography.labelSmall,
                 color = EchoColors.TextMuted,
             )
@@ -505,7 +503,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            "${candidate.dataParts.size} DataNNNN • ${formatGodBytes(candidate.rawDataBytes)} no Xbox • até ${formatGodBytes(candidate.estimatedIsoBytes)} temporários",
+                            "${candidate.dataParts.size} DataNNNN • ${formatGodBytes(candidate.rawDataBytes)} no Xbox • Quick Probe sem XISO completa",
                             style = MaterialTheme.typography.labelSmall,
                             color = EchoColors.TextMuted,
                         )
@@ -561,7 +559,10 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
 
                 GodFixField("GOD", current.candidate.label)
                 GodFixField("PAYLOAD", current.detectedPayloadPath ?: "--")
-                GodFixField("CACHE TEMP", formatGodBytes(current.tempIsoBytes))
+                GodFixField(
+                    "CACHE DE ANÁLISE",
+                    if (current.tempIsoBytes == 0L) "0 B • leitura esparsa" else formatGodBytes(current.tempIsoBytes),
+                )
                 GodFixField(
                     "LAYOUT",
                     "XSF ${if (current.hasXsfHeader) "presente" else "reconstruído"} • correção de setor ${current.sectorCorrection}",
@@ -611,7 +612,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                         execution = null
                         progress = null
                         infoMessage = if (deleted) {
-                            "Cache temporário e checkpoint descartados. O GOD no Xbox não foi alterado."
+                            "Cache temporário e estado da análise descartados. O GOD no Xbox não foi alterado."
                         } else {
                             "Não foi possível remover todo o cache temporário agora."
                         }
@@ -705,7 +706,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
             title = { Text("Analisar este GOD?") },
             text = {
                 Text(
-                    "O EchoFix vai reconstruir uma XISO temporária no celular, mas agora o trabalho roda em segundo plano e grava checkpoint a cada poucos MB. Você pode sair do app ou bloquear a tela. Se o processo cair, a próxima execução continua do checkpoint salvo. Pode usar até aproximadamente ${formatGodBytes(candidate.estimatedIsoBytes)}. O GOD original permanecerá intacto. Continuar?",
+                    "O EchoFix vai executar um Quick Probe esparso: lê somente as faixas necessárias dos DataNNNN para localizar content/0000000000000000/FFED2000/FFFFFFFF e inspecionar os headers STFS. Não reconstrói uma XISO completa nesta etapa e não altera o GOD original. Se encontrar um instalador, a extração do pacote necessário só acontece depois que você validar os destinos e mandar instalar. Continuar?",
                 )
             },
             confirmButton = {
@@ -714,7 +715,7 @@ fun GodInstallerEchoFixSection(modifier: Modifier = Modifier) {
                         pendingAnalysis = null
                         startBackgroundAnalysis(candidate)
                     },
-                ) { Text("ANALISAR EM SEGUNDO PLANO") }
+                ) { Text("INICIAR QUICK PROBE") }
             },
             dismissButton = {
                 TextButton(onClick = { pendingAnalysis = null }) { Text("CANCELAR") }
