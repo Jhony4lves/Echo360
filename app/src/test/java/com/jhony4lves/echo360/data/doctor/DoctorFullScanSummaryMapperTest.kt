@@ -28,7 +28,7 @@ class DoctorFullScanSummaryMapperTest {
     fun `partial telemetry remains partial without becoming health failure`() {
         val report = DoctorTelemetryReport(
             snapshot = DoctorTelemetrySnapshot(
-                origin = DoctorTelemetryOrigin.EchoCore,
+                origin = DoctorTelemetryOrigin.NovaCompatibility,
                 memory = DoctorMemorySnapshot(100L, 200L, 300L),
                 temperature = null,
                 unavailable = listOf(
@@ -46,7 +46,7 @@ class DoctorFullScanSummaryMapperTest {
 
         assertEquals(DoctorScanAvailability.Partial, summary.availability)
         assertEquals(0, summary.healthIssueCount)
-        assertTrue(summary.detail.contains("EchoCore"))
+        assertTrue(summary.detail.contains("NOVA"))
         assertTrue(summary.detail.contains("RAM"))
     }
 

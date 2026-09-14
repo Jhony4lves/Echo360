@@ -2,14 +2,12 @@ package com.jhony4lves.echo360.domain.library
 
 enum class CurrentTitleOrigin {
     NovaCompatibility,
-    EchoCore,
 }
 
 /**
- * Runtime observation shared by lightweight title sources.
+ * Runtime observation produced by the active Aurora NOVA source.
  *
- * EchoCore CURRENT_TITLE is intentionally allowed to provide only Title ID.
- * NOVA may enrich the same observation with Media ID and full NowPlaying details.
+ * NOVA may enrich the observation with Media ID and full NowPlaying details.
  * Missing metadata stays null rather than being fabricated as zero values.
  */
 data class CurrentTitleObservation(

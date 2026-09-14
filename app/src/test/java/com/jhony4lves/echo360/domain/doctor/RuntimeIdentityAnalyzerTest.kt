@@ -68,14 +68,14 @@ class RuntimeIdentityAnalyzerTest {
     @Test
     fun `unknown Media ID never produces mismatch`() {
         val unknownLibraryMedia = game(mediaId = 0L)
-        val minimalEchoCore = CurrentTitleObservation(
+        val minimalNova = CurrentTitleObservation(
             titleId = unknownLibraryMedia.titleId,
-            origin = CurrentTitleOrigin.EchoCore,
+            origin = CurrentTitleOrigin.NovaCompatibility,
             mediaId = null,
             details = null,
         )
 
-        val report = analyzer.analyze(unknownLibraryMedia, minimalEchoCore)
+        val report = analyzer.analyze(unknownLibraryMedia, minimalNova)
 
         assertTrue(report.sameTitle)
         assertFalse(report.mediaComparable)

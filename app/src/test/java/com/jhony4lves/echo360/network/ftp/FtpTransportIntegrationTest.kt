@@ -19,6 +19,12 @@ import java.util.Collections
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
+/**
+ * Protocol-level coverage for the real transports used by EchoTransfer and
+ * Xbox-resident EchoFix. In particular, prefix RETR must transfer only the
+ * requested STFS header bytes to the client, while RNFR/RNTO must not create a
+ * data-channel transfer at all.
+ */
 class FtpTransportIntegrationTest {
     @Test
     fun `Aurora upload uses passive data channel`() {
@@ -110,6 +116,126 @@ class FtpTransportIntegrationTest {
         assertTrue(server.commands.any { it == "STOR /fHdd/Content/test.bin" })
     }
 
+    @Test
+    fun `Aurora prefix read uses passive RETR and returns exact requested bytes`() {
+        val payload = ByteArray(0x368) { index -> (index and 0xff).toByte() }
+        val server = FakeFtpServer.startPassive(retrPayload = payload)
+
+        val result = runBlocking {
+            val session = AuroraPassiveFtpSession.connect(
+                profile = profile(auroraPort = server.port),
+                timeoutMs = 2_000,
+            )
+            try {
+                session.readPrefixAndClose(
+                    canonicalPath = "/Hdd1/Games/Test/content/0000000000000000/FFED2000/FFFFFFFF/pkg",
+                    byteCount = payload.size,
+                )
+            } finally {
+                runCatching { session.close() }
+            }
+        }
+
+        server.await()
+        assertArrayEquals(payload, result)
+        assertTrue(server.commands.any { it == "PASV" })
+        assertTrue(
+            server.commands.any {
+                it == "RETR /Hdd1/Games/Test/content/0000000000000000/FFED2000/FFFFFFFF/pkg"
+            },
+        )
+    }
+
+    @Test
+    fun `FTPdll prefix read uses active RETR and fHdd namespace`() {
+        val payload = ByteArray(0x368) { index -> ((255 - index) and 0xff).toByte() }
+        val server = FakeFtpServer.startActive(retrPayload = payload)
+
+        val result = runBlocking {
+            val session = FtpDllActiveFtpSession.connect(
+                profile = profile(ftpDllPort = server.port),
+                timeoutMs = 2_000,
+            )
+            try {
+                session.readPrefixAndClose(
+                    canonicalPath = "/Hdd1/Games/Test/content/0000000000000000/FFED2000/FFFFFFFF/pkg",
+                    byteCount = payload.size,
+                )
+            } finally {
+                runCatching { session.close() }
+            }
+        }
+
+        server.await()
+        assertArrayEquals(payload, result)
+        assertTrue(server.commands.any { it.startsWith("PORT ") })
+        assertTrue(
+            server.commands.any {
+                it == "RETR /fHdd/Games/Test/content/0000000000000000/FFED2000/FFFFFFFF/pkg"
+            },
+        )
+    }
+
+    @Test
+    fun `Aurora server-side move uses RNFR and RNTO without data transfer`() {
+        val server = FakeFtpServer.startPassive()
+
+        runBlocking {
+            val session = AuroraPassiveFtpSession.connect(
+                profile = profile(auroraPort = server.port),
+                timeoutMs = 2_000,
+            )
+            try {
+                session.rename(
+                    fromCanonicalPath = "/Hdd1/Games/Test/pkg",
+                    toCanonicalPath = "/Hdd1/Content/0000000000000000/465307E4/00000002/pkg",
+                )
+            } finally {
+                runCatching { session.close() }
+            }
+        }
+
+        server.await()
+        assertTrue(server.commands.any { it == "RNFR /Hdd1/Games/Test/pkg" })
+        assertTrue(
+            server.commands.any {
+                it == "RNTO /Hdd1/Content/0000000000000000/465307E4/00000002/pkg"
+            },
+        )
+        assertFalse(server.commands.any { it == "STOR" || it.startsWith("STOR ") })
+        assertFalse(server.commands.any { it == "RETR" || it.startsWith("RETR ") })
+    }
+
+    @Test
+    fun `FTPdll server-side move maps both RNFR and RNTO to fHdd`() {
+        val server = FakeFtpServer.startActive()
+
+        runBlocking {
+            val session = FtpDllActiveFtpSession.connect(
+                profile = profile(ftpDllPort = server.port),
+                timeoutMs = 2_000,
+            )
+            try {
+                session.rename(
+                    fromCanonicalPath = "/Hdd1/Games/Test/pkg",
+                    toCanonicalPath = "/Hdd1/Content/0000000000000000/465307E4/00000002/pkg",
+                )
+            } finally {
+                runCatching { session.close() }
+            }
+        }
+
+        server.await()
+        assertTrue(server.commands.any { it == "RNFR /fHdd/Games/Test/pkg" })
+        assertTrue(
+            server.commands.any {
+                it == "RNTO /fHdd/Content/0000000000000000/465307E4/00000002/pkg"
+            },
+        )
+        assertFalse(server.commands.any { it == "STOR" || it.startsWith("STOR ") })
+        assertFalse(server.commands.any { it == "RETR" || it.startsWith("RETR ") })
+    }
+
     private fun failAt(stage: String, server: FakeFtpServer, error: Throwable): Nothing {
         throw AssertionError(
             "$stage failed. ${server.diagnostics()}",
@@ -137,6 +263,7 @@ class FtpTransportIntegrationTest {
     private class FakeFtpServer private constructor(
         private val controlListener: ServerSocket,
         private val mode: Mode,
+        private val retrPayload: ByteArray,
     ) {
         val port: Int = controlListener.localPort
         val commands: MutableList<String> = Collections.synchronizedList(mutableListOf())
@@ -207,6 +334,36 @@ class FtpTransportIntegrationTest {
                     writer.flush()
                 }
 
+                fun withDataSocket(block: (Socket) -> Unit) {
+                    when (mode) {
+                        Mode.Passive -> {
+                            val listener = checkNotNull(passiveListener) {
+                                "PASV was not negotiated before data command."
+                            }
+                            events += "passive-await-data:${listener.localSocketAddress}"
+                            listener.accept().use { data ->
+                                events += "passive-data-accepted remote=${data.remoteSocketAddress}"
+                                data.soTimeout = 3_000
+                                block(data)
+                            }
+                            listener.close()
+                            passiveListener = null
+                        }
+                        Mode.Active -> {
+                            val endpoint = checkNotNull(activeEndpoint) {
+                                "PORT was not negotiated before data command."
+                            }
+                            events += "active-data-connect:$endpoint"
+                            Socket().use { data ->
+                                data.soTimeout = 3_000
+                                data.connect(endpoint, 2_000)
+                                events += "active-data-connected local=${data.localSocketAddress} remote=${data.remoteSocketAddress}"
+                                block(data)
+                            }
+                        }
+                    }
+                }
+
                 reply("220 Echo360 fake FTP ready")
 
                 while (true) {
@@ -224,9 +381,10 @@ class FtpTransportIntegrationTest {
                         "PASV" -> {
                             check(mode == Mode.Passive) { "PASV used against active-only fake server." }
                             passiveListener?.close()
-                            passiveListener = ServerSocket(0)
-                            val p = passiveListener.localPort
-                            events += "passive-listen:${passiveListener.localSocketAddress}"
+                            val listener = ServerSocket(0)
+                            passiveListener = listener
+                            val p = listener.localPort
+                            events += "passive-listen:${listener.localSocketAddress}"
                             reply("227 Entering Passive Mode (127,0,0,1,${p / 256},${p % 256})")
                         }
                         "EPSV" -> reply("500 EPSV not supported")
@@ -238,33 +396,25 @@ class FtpTransportIntegrationTest {
                         }
                         "STOR" -> {
                             reply("150 Opening binary data connection")
-                            when (mode) {
-                                Mode.Passive -> {
-                                    val listener = checkNotNull(passiveListener) { "PASV was not negotiated before STOR." }
-                                    events += "passive-await-data:${listener.localSocketAddress}"
-                                    listener.accept().use { data ->
-                                        events += "passive-data-accepted remote=${data.remoteSocketAddress}"
-                                        data.soTimeout = 3_000
-                                        data.getInputStream().copyTo(received)
-                                    }
-                                    events += "passive-data-complete bytes=${received.size()}"
-                                    listener.close()
-                                    passiveListener = null
-                                }
-                                Mode.Active -> {
-                                    val endpoint = checkNotNull(activeEndpoint) { "PORT was not negotiated before STOR." }
-                                    events += "active-data-connect:$endpoint"
-                                    Socket().use { data ->
-                                        data.soTimeout = 3_000
-                                        data.connect(endpoint, 2_000)
-                                        events += "active-data-connected local=${data.localSocketAddress} remote=${data.remoteSocketAddress}"
-                                        data.getInputStream().copyTo(received)
-                                    }
-                                    events += "active-data-complete bytes=${received.size()}"
-                                }
+                            withDataSocket { data ->
+                                data.getInputStream().copyTo(received)
                             }
+                            events += "data-store-complete bytes=${received.size()}"
                             reply("226 Transfer complete")
                         }
+                        "RETR" -> {
+                            reply("150 Opening binary data connection")
+                            withDataSocket { data ->
+                                data.getOutputStream().use { output ->
+                                    output.write(retrPayload)
+                                    output.flush()
+                                }
+                            }
+                            events += "data-retr-complete bytes=${retrPayload.size}"
+                            if (runCatching { reply("226 Transfer complete") }.isFailure) return
+                        }
+                        "RNFR" -> reply("350 File exists, ready for destination name")
+                        "RNTO" -> reply("250 Rename successful")
                         "SIZE" -> reply("213 ${received.size()}")
                         "QUIT" -> {
                             reply("221 Goodbye")
@@ -288,14 +438,16 @@ class FtpTransportIntegrationTest {
         }
 
         companion object {
-            fun startPassive(): FakeFtpServer = FakeFtpServer(
+            fun startPassive(retrPayload: ByteArray = ByteArray(0)): FakeFtpServer = FakeFtpServer(
                 controlListener = ServerSocket(0),
                 mode = Mode.Passive,
+                retrPayload = retrPayload,
             )
 
-            fun startActive(): FakeFtpServer = FakeFtpServer(
+            fun startActive(retrPayload: ByteArray = ByteArray(0)): FakeFtpServer = FakeFtpServer(
                 controlListener = ServerSocket(0),
                 mode = Mode.Active,
+                retrPayload = retrPayload,
             )
         }
 

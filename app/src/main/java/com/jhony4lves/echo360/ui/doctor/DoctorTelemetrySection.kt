@@ -33,7 +33,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jhony4lves.echo360.data.doctor.DoctorTelemetryRepository
 import com.jhony4lves.echo360.domain.doctor.DoctorTelemetryComponent
-import com.jhony4lves.echo360.domain.doctor.DoctorTelemetryOrigin
 import com.jhony4lves.echo360.domain.doctor.DoctorTelemetryReport
 import com.jhony4lves.echo360.domain.integrity.IntegrityFinding
 import com.jhony4lves.echo360.domain.integrity.IntegritySeverity
@@ -152,7 +151,7 @@ internal fun DoctorTelemetrySection() {
                                 modifier = Modifier.size(20.dp),
                             )
                             Spacer(Modifier.width(8.dp))
-                            EchoEyebrow("MEMORY // ${originLabel(current.snapshot.origin)}")
+                            EchoEyebrow("MEMORY // NOVA COMPAT")
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             TelemetryMetric("USADA", formatBytes(memory.usedBytes), Modifier.weight(1f))
@@ -307,11 +306,6 @@ private fun telemetryStatus(report: DoctorTelemetryReport?, loading: Boolean): S
     report.snapshot.unavailable.isNotEmpty() -> "PARTIAL"
     report.errors > 0 || report.warnings > 0 -> "CHECK"
     else -> "RAW"
-}
-
-private fun originLabel(origin: DoctorTelemetryOrigin): String = when (origin) {
-    DoctorTelemetryOrigin.NovaCompatibility -> "NOVA COMPAT"
-    DoctorTelemetryOrigin.EchoCore -> "ECHOCORE"
 }
 
 private fun componentLabel(component: DoctorTelemetryComponent): String = when (component) {

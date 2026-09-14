@@ -6,7 +6,6 @@ import com.jhony4lves.echo360.domain.integrity.IntegritySeverity
 enum class DoctorStorageOrigin {
     AuroraFtpCompatibility,
     FtpDllCompatibility,
-    EchoCore,
     Unavailable,
 }
 

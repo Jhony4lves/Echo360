@@ -3,14 +3,20 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Aurora NOVA exposes its local Xbox compatibility API over plain HTTP. -->
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_echo360_launcher"
         android:roundIcon="@drawable/ic_echo360_launcher"
         android:label="Echo360"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Echo360">
+        android:theme="@style/Theme.Echo360"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
@@ -20,6 +26,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".data.fix.GodInstallerForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 </manifest>

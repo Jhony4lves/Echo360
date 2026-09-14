@@ -40,6 +40,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,7 +48,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -77,10 +77,10 @@ fun XboxSystemScreen(
     val store = remember(context) { SecureXboxConfigStore(context) }
     val repository = remember { XboxConnectionRepository() }
     val scope = rememberCoroutineScope()
-    val initial = remember { store.load() ?: XboxProfile() }
+    val savedProfile = remember { store.load() }
+    val initial = remember { savedProfile ?: XboxProfile() }
 
     var host by remember { mutableStateOf(initial.endpoint.host) }
-    var echoLinkPort by remember { mutableStateOf(initial.endpoint.echoLinkPort.toString()) }
     var novaPort by remember { mutableStateOf(initial.endpoint.novaPort.toString()) }
     var auroraPort by remember { mutableStateOf(initial.endpoint.auroraFtpPort.toString()) }
     var ftpDllPort by remember { mutableStateOf(initial.endpoint.ftpDllPort.toString()) }
@@ -104,7 +104,6 @@ fun XboxSystemScreen(
         XboxProfile(
             endpoint = XboxEndpoint(
                 host = host,
-                echoLinkPort = echoLinkPort.toInt(),
                 novaPort = novaPort.toInt(),
                 auroraFtpPort = auroraPort.toInt(),
                 ftpDllPort = ftpDllPort.toInt(),
@@ -152,14 +151,24 @@ fun XboxSystemScreen(
         }
     }
 
+    LaunchedEffect(savedProfile) {
+        val profile = savedProfile ?: return@LaunchedEffect
+        isTesting = true
+        message = null
+        snapshot = runCatching {
+            repository.check(profile)
+        }.onFailure {
+            message = "Xbox salvo, mas a rede não respondeu ao teste automático agora."
+        }.getOrNull()
+        isTesting = false
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            ConsoleHeader()
-        }
+        item { ConsoleHeader() }
 
         item {
             EchoPanel(
@@ -219,16 +228,15 @@ fun XboxSystemScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        PortField("EchoCore", echoLinkPort, { echoLinkPort = it }, Modifier.weight(1f))
                         PortField("NOVA", novaPort, { novaPort = it }, Modifier.weight(1f))
+                        PortField("Aurora FTP", auroraPort, { auroraPort = it }, Modifier.weight(1f))
                     }
-                    Row(
+                    PortField(
+                        label = "FTPDll",
+                        value = ftpDllPort,
+                        onValueChange = { ftpDllPort = it },
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        PortField("Aurora", auroraPort, { auroraPort = it }, Modifier.weight(1f))
-                        PortField("FTPdll", ftpDllPort, { ftpDllPort = it }, Modifier.weight(1f))
-                    }
+                    )
                 }
             }
         }
@@ -236,7 +244,7 @@ fun XboxSystemScreen(
         item {
             CredentialPanel(
                 title = "NOVA",
-                description = "API local e autenticação do console.",
+                description = "API local da Aurora para recursos compatíveis.",
                 icon = Icons.Outlined.SettingsEthernet,
                 username = novaUser,
                 password = novaPassword,
@@ -250,7 +258,7 @@ fun XboxSystemScreen(
         item {
             CredentialPanel(
                 title = "AURORA FTP",
-                description = "Canal rápido para listagem e transferência.",
+                description = "FTP passivo para listagem, leitura e transferência.",
                 icon = Icons.Outlined.FolderOpen,
                 username = auroraUser,
                 password = auroraPassword,
@@ -264,7 +272,7 @@ fun XboxSystemScreen(
         item {
             CredentialPanel(
                 title = "FTPDLL",
-                description = "Canal de compatibilidade e segundo plano.",
+                description = "FTP ativo e segundo provedor do Auto Router.",
                 icon = Icons.Outlined.Bolt,
                 username = ftpDllUser,
                 password = ftpDllPassword,
@@ -275,9 +283,7 @@ fun XboxSystemScreen(
             )
         }
 
-        item {
-            SecurityInfoPanel()
-        }
+        item { SecurityInfoPanel() }
 
         item {
             Row(
@@ -346,8 +352,13 @@ fun XboxSystemScreen(
         snapshot?.let { result ->
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    EchoEyebrow(if (result.consoleReachable) "CONSOLE ONLINE" else "CONSOLE STATUS")
-                    TransportCard(result.echoCore)
+                    EchoEyebrow(
+                        when {
+                            result.fileTransportReachable -> "ARQUIVOS ONLINE"
+                            result.consoleReachable -> "CONSOLE ONLINE"
+                            else -> "CONSOLE STATUS"
+                        },
+                    )
                     TransportCard(result.nova)
                     TransportCard(result.auroraFtp)
                     TransportCard(result.ftpDll)
@@ -380,7 +391,7 @@ private fun ConsoleHeader() {
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "EchoCore primeiro, NOVA/FTP como compatibilidade. Credenciais continuam protegidas pelo Android Keystore.",
+            text = "Aurora NOVA, Aurora FTP e FTPDll. Nenhum serviço residente do Echo360 é necessário no Xbox.",
             style = MaterialTheme.typography.bodyLarge,
             color = EchoColors.TextSecondary,
         )
@@ -524,7 +535,7 @@ private fun SecurityInfoPanel() {
             )
             Spacer(Modifier.width(10.dp))
             Text(
-                text = "EchoCore usa apenas PING/PONG no bootstrap atual. Pairing/auth e comandos privilegiados só entram quando o contrato Xbox-side estiver fechado.",
+                text = "As credenciais ficam protegidas pelo Android Keystore. O teste valida os provedores externos ativos e não depende de porta 36000 ou XEX residente.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = EchoColors.TextSecondary,
             )
@@ -597,7 +608,6 @@ private fun EchoTextField(
 @Composable
 private fun TransportCard(health: TransportHealth) {
     val title = when (health.transport) {
-        XboxTransport.EchoCore -> "ECHOCORE"
         XboxTransport.Nova -> "NOVA"
         XboxTransport.AuroraFtp -> "AURORA FTP"
         XboxTransport.FtpDll -> "FTPDLL"

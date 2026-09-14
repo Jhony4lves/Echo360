@@ -13,12 +13,11 @@ import com.jhony4lves.echo360.network.nova.AuroraNovaClient
 import kotlinx.coroutines.CancellationException
 
 /**
- * One read from any read-only Doctor telemetry provider.
+ * One read from the active read-only Doctor telemetry provider.
  *
- * Memory and temperature are deliberately independent: a provider may return
- * either component while marking the other unavailable. That matches the
- * candidate EchoCore DOCTOR_TELEMETRY payload and prevents partial transport or
- * ABI failures from erasing valid evidence.
+ * Memory and temperature are deliberately independent: NOVA may return either
+ * component while the other is unavailable, preserving valid evidence instead
+ * of converting a partial read into a fabricated all-or-nothing result.
  */
 internal data class DoctorTelemetrySourceRead(
     val origin: DoctorTelemetryOrigin,
@@ -31,7 +30,6 @@ internal interface DoctorTelemetrySource {
     suspend fun read(profile: XboxProfile): DoctorTelemetrySourceRead
 }
 
-/** Production compatibility source until EchoCore telemetry is hardware-promoted. */
 internal class NovaDoctorTelemetrySource(
     private val novaClient: AuroraNovaClient = AuroraNovaClient(),
 ) : DoctorTelemetrySource {

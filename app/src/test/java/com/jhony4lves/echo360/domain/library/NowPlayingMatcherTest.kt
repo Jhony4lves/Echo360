@@ -40,13 +40,13 @@ class NowPlayingMatcherTest {
     }
 
     @Test
-    fun `title-only EchoCore style observation falls back to title id`() {
+    fun `title-only NOVA observation falls back to title id`() {
         val matched = matchObservedGame(
             games,
             CurrentTitleObservation(
                 titleId = first.titleId,
                 mediaId = null,
-                origin = CurrentTitleOrigin.EchoCore,
+                origin = CurrentTitleOrigin.NovaCompatibility,
             ),
         )
 
@@ -72,13 +72,13 @@ class NowPlayingMatcherTest {
         assertNull(
             matchObservedGame(
                 games,
-                CurrentTitleObservation(0L, CurrentTitleOrigin.EchoCore),
+                CurrentTitleObservation(0L, CurrentTitleOrigin.NovaCompatibility),
             ),
         )
         assertNull(
             matchObservedGame(
                 games,
-                CurrentTitleObservation(0x12345678, CurrentTitleOrigin.EchoCore),
+                CurrentTitleObservation(0x12345678, CurrentTitleOrigin.NovaCompatibility),
             ),
         )
     }

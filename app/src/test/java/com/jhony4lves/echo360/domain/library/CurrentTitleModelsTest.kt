@@ -1,7 +1,6 @@
 package com.jhony4lves.echo360.domain.library
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -18,19 +17,7 @@ class CurrentTitleModelsTest {
         assertSame(rich, observation.details)
         assertEquals(CurrentTitleOrigin.NovaCompatibility, observation.origin)
         assertTrue(observation.hasRichDetails)
-    }
-
-    @Test
-    fun `minimal EchoCore style observation keeps rich metadata absent`() {
-        val observation = CurrentTitleObservation(
-            titleId = 0x545408A7L,
-            origin = CurrentTitleOrigin.EchoCore,
-        )
-
-        assertNull(observation.mediaId)
-        assertNull(observation.details)
-        assertFalse(observation.hasRichDetails)
-        assertEquals("545408A7", observation.titleIdHex)
+        assertEquals("465307E4", observation.titleIdHex)
     }
 
     private fun nowPlaying(mediaId: Long) = NowPlaying(

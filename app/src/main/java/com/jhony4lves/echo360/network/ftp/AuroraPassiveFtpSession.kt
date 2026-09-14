@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -65,6 +66,78 @@ class AuroraPassiveFtpSession private constructor(
         }
     }
 
+    override suspend fun readPrefixAndClose(
+        canonicalPath: String,
+        byteCount: Int,
+    ): ByteArray = readRangeAndClose(canonicalPath, 0L, byteCount)
+
+    override suspend fun readRangeAndClose(
+        canonicalPath: String,
+        offset: Long,
+        byteCount: Int,
+    ): ByteArray = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            require(offset >= 0L) { "Offset FTP deve ser >= 0." }
+            require(byteCount > 0) { "byteCount deve ser maior que zero." }
+            val remote = XboxPath.toAuroraFtpPath(XboxPath.canonical(canonicalPath))
+            val output = ByteArrayOutputStream(byteCount.coerceAtMost(64 * 1024))
+
+            try {
+                openPassiveSocket().use { dataSocket ->
+                    if (offset > 0L) {
+                        val rest = channel.command("REST $offset")
+                        if (rest.code != 350) {
+                            throw FtpProtocolException(
+                                rest.code,
+                                "Aurora recusou REST $offset: ${rest.lines.firstOrNull().orEmpty()}",
+                            )
+                        }
+                    }
+                    channel.send("RETR $remote")
+                    expectPreliminary(channel.read(), "Aurora não iniciou RETR parcial.")
+                    val input = dataSocket.getInputStream()
+                    val buffer = ByteArray(minOf(32 * 1024, byteCount))
+                    var remaining = byteCount
+                    while (remaining > 0) {
+                        val read = input.read(buffer, 0, minOf(buffer.size, remaining))
+                        if (read < 0) break
+                        if (read == 0) continue
+                        output.write(buffer, 0, read)
+                        remaining -= read
+                    }
+                }
+                output.toByteArray()
+            } finally {
+                // A bounded RETR intentionally ends before the remote file. Do
+                // not attempt to reuse this control channel after the data
+                // socket closes; the server may still emit 426/226.
+                channel.closeImmediately()
+            }
+        }
+    }
+
+    override suspend fun rename(
+        fromCanonicalPath: String,
+        toCanonicalPath: String,
+    ) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            val fromCanonical = XboxPath.canonical(fromCanonicalPath)
+            val toCanonical = XboxPath.canonical(toCanonicalPath)
+            require(fromCanonical != toCanonical) { "Origem e destino do rename são iguais." }
+
+            val parent = toCanonical.substringBeforeLast('/', "/").ifBlank { "/" }
+            ensureDirectoryLocked(parent)
+
+            val fromRemote = XboxPath.toAuroraFtpPath(fromCanonical)
+            val toRemote = XboxPath.toAuroraFtpPath(toCanonical)
+            val rnfr = channel.command("RNFR $fromRemote")
+            if (rnfr.code != 350) {
+                throw FtpProtocolException(rnfr.code, "Aurora recusou RNFR: ${rnfr.lines.firstOrNull().orEmpty()}")
+            }
+            expectPositive(channel.command("RNTO $toRemote"), "Aurora recusou RNTO.")
+        }
+    }
+
     override suspend fun upload(
         canonicalPath: String,
         source: InputStream,
@@ -95,10 +168,27 @@ class AuroraPassiveFtpSession private constructor(
         canonicalPath: String,
         destination: OutputStream,
         onProgress: (Long) -> Unit,
+    ) = downloadFromOffset(canonicalPath, 0L, destination, onProgress)
+
+    override suspend fun downloadFromOffset(
+        canonicalPath: String,
+        offset: Long,
+        destination: OutputStream,
+        onProgress: (Long) -> Unit,
     ) = mutex.withLock {
         withContext(Dispatchers.IO) {
+            require(offset >= 0L) { "Offset FTP deve ser >= 0." }
             val remote = XboxPath.toAuroraFtpPath(XboxPath.canonical(canonicalPath))
             openPassiveSocket().use { dataSocket ->
+                if (offset > 0L) {
+                    val rest = channel.command("REST $offset")
+                    if (rest.code != 350) {
+                        throw FtpProtocolException(
+                            rest.code,
+                            "Aurora recusou REST $offset: ${rest.lines.firstOrNull().orEmpty()}",
+                        )
+                    }
+                }
                 channel.send("RETR $remote")
                 expectPreliminary(channel.read(), "Aurora não iniciou RETR.")
                 dataSocket.getInputStream().use { input ->
