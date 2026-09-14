@@ -43,9 +43,9 @@ data class GodBackgroundJobSnapshot(
 }
 
 /**
- * Small persistent control plane for the foreground EchoFix worker. The large
- * XISO/checkpoint stays on disk; SharedPreferences stores only enough metadata
- * to reconnect UI/service after process death.
+ * Small persistent control plane for the foreground EchoFix worker. Modern
+ * Rule 002 analysis is sparse: SharedPreferences keeps only enough metadata to
+ * reconnect UI/service after process death, never a multi-gigabyte XISO job.
  */
 class GodRepairJobStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -59,15 +59,28 @@ class GodRepairJobStore(context: Context) {
             ?.let { runCatching { decodeCandidate(it) }.getOrNull() }
         val stage = prefs.getString(KEY_STAGE, null)
             ?.let { runCatching { GodRepairStage.valueOf(it) }.getOrNull() }
+        val rawMessage = prefs.getString(KEY_MESSAGE, "").orEmpty()
+        val rawCompleted = prefs.getLong(KEY_COMPLETED, 0L)
+        val rawTotal = prefs.getLong(KEY_TOTAL, 0L)
+        val legacyFullXiso = isLegacyFullXisoState(
+            state = state,
+            candidate = candidate,
+            message = rawMessage,
+            totalBytes = rawTotal,
+        )
 
         return GodBackgroundJobSnapshot(
             state = state,
             rootPath = prefs.getString(KEY_ROOT, null),
             candidate = candidate,
-            stage = stage,
-            message = prefs.getString(KEY_MESSAGE, "").orEmpty(),
-            completedBytes = prefs.getLong(KEY_COMPLETED, 0L),
-            totalBytes = prefs.getLong(KEY_TOTAL, 0L),
+            stage = if (legacyFullXiso) GodRepairStage.ReadingContainer else stage,
+            message = if (legacyFullXiso) {
+                "Checkpoint XISO legado detectado. O EchoFix vai retomar com Quick Probe esparso, sem reconstruir vários GB."
+            } else {
+                rawMessage
+            },
+            completedBytes = if (legacyFullXiso) 0L else rawCompleted,
+            totalBytes = if (legacyFullXiso) 0L else rawTotal,
             updatedAtEpochMs = prefs.getLong(KEY_UPDATED_AT, 0L),
             error = prefs.getString(KEY_ERROR, null),
         )
@@ -80,9 +93,9 @@ class GodRepairJobStore(context: Context) {
             .putString(KEY_ROOT, rootPath)
             .putString(KEY_CANDIDATE, encodeCandidate(candidate))
             .putString(KEY_STAGE, GodRepairStage.ReadingContainer.name)
-            .putString(KEY_MESSAGE, "Preparando análise retomável de ${candidate.label}...")
+            .putString(KEY_MESSAGE, "Preparando Quick Probe esparso de ${candidate.label}...")
             .putLong(KEY_COMPLETED, 0L)
-            .putLong(KEY_TOTAL, candidate.rawDataBytes)
+            .putLong(KEY_TOTAL, 0L)
             .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
             .remove(KEY_ERROR)
             .commit()
@@ -91,12 +104,20 @@ class GodRepairJobStore(context: Context) {
 
     @Synchronized
     fun markRunning(message: String? = null) {
-        val edit = prefs.edit()
+        val safeMessage = message
+            ?.takeUnless(::looksLikeLegacyFullXisoMessage)
+            ?.takeIf { it.isNotBlank() }
+            ?: "Preparando Quick Probe esparso..."
+
+        prefs.edit()
             .putString(KEY_STATE, GodBackgroundJobState.Running.name)
+            .putString(KEY_STAGE, GodRepairStage.ReadingContainer.name)
+            .putString(KEY_MESSAGE, safeMessage)
+            .putLong(KEY_COMPLETED, 0L)
+            .putLong(KEY_TOTAL, 0L)
             .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
             .remove(KEY_ERROR)
-        if (message != null) edit.putString(KEY_MESSAGE, message)
-        edit.apply()
+            .apply()
     }
 
     @Synchronized
@@ -113,7 +134,7 @@ class GodRepairJobStore(context: Context) {
     }
 
     @Synchronized
-    fun markPaused(message: String = "Análise pausada. O checkpoint foi preservado.") {
+    fun markPaused(message: String = "Quick Probe pausado. O estado da análise foi preservado.") {
         prefs.edit()
             .putString(KEY_STATE, GodBackgroundJobState.Paused.name)
             .putString(KEY_MESSAGE, message)
@@ -138,7 +159,7 @@ class GodRepairJobStore(context: Context) {
     fun markFailed(message: String) {
         prefs.edit()
             .putString(KEY_STATE, GodBackgroundJobState.Failed.name)
-            .putString(KEY_MESSAGE, "A análise parou, mas o checkpoint foi preservado.")
+            .putString(KEY_MESSAGE, "O Quick Probe parou. O GOD original permanece intacto e a análise pode ser retomada.")
             .putString(KEY_ERROR, message)
             .putLong(KEY_UPDATED_AT, System.currentTimeMillis())
             .apply()
@@ -146,8 +167,8 @@ class GodRepairJobStore(context: Context) {
 
     @Synchronized
     fun markNotApplicable() {
-        // The XISO/checkpoint is already deleted by the analyzer in this case.
-        // There is deliberately no resumable job left for the UI to offer.
+        // A análise já concluiu que este GOD não atende à receita. Não há job
+        // retomável que precise continuar aparecendo na UI.
         prefs.edit().clear().commit()
     }
 
@@ -155,6 +176,22 @@ class GodRepairJobStore(context: Context) {
     fun clear() {
         prefs.edit().clear().apply()
     }
+
+    private fun isLegacyFullXisoState(
+        state: GodBackgroundJobState,
+        candidate: GodPackageCandidate?,
+        message: String,
+        totalBytes: Long,
+    ): Boolean {
+        if (state == GodBackgroundJobState.Idle || state == GodBackgroundJobState.Completed) return false
+        if (looksLikeLegacyFullXisoMessage(message)) return true
+        return candidate != null && totalBytes > 0L && totalBytes == candidate.rawDataBytes
+    }
+
+    private fun looksLikeLegacyFullXisoMessage(message: String): Boolean =
+        message.contains("GOD → XISO", ignoreCase = true) ||
+            (message.contains("XISO", ignoreCase = true) &&
+                message.contains("Data000", ignoreCase = true))
 
     companion object {
         private const val PREFS_NAME = "echofix_god_background_job"
